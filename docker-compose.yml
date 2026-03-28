@@ -1,0 +1,22 @@
+services:
+  whisper-gui:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${APP_PORT:-8080}:8000"
+    environment:
+      TRANSCRIPTION_ENGINE: ${TRANSCRIPTION_ENGINE:-faster-whisper}
+      WHISPER_MODEL_SIZE:   ${WHISPER_MODEL_SIZE:-large-v3}
+      CANARY_MODEL:         ${CANARY_MODEL:-nvidia/canary-qwen-2.5b}
+      QWEN_MODEL:           ${QWEN_MODEL:-Qwen/Qwen2.5-Audio-3B-Instruct}
+      COMPUTE_TYPE:         ${COMPUTE_TYPE:-int8}
+      LANGUAGE:             ${LANGUAGE:-en}
+      # HuggingFace model cache — all HF models land here (faster-whisper, canary, qwen-audio).
+      HF_HOME:              /models/hf
+      # openai-whisper downloads .pt files here (separate from HF cache).
+      WHISPER_DOWNLOAD_ROOT: /models/whisper
+    volumes:
+      - ${MODELS_VOLUME:-./volumes/models}:/models
+      - ${AUDIO_CACHE_VOLUME:-./volumes/audio_cache}:/cache/audio
+    restart: unless-stopped

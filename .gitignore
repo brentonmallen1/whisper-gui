@@ -1,0 +1,10 @@
+.env
+volumes/
+backend/cache/
+__pycache__/
+*.pyc
+*.pyo
+.pyo
+.DS_Store
+.venv/
+uv.lock

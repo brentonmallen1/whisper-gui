@@ -1,0 +1,12 @@
+# GPU override — merge on top of docker-compose.yml when ENABLE_GPU=true.
+# Run with:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# Or use start.sh which reads ENABLE_GPU from .env automatically.
+services:
+  whisper-gui:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${NVIDIA_VISIBLE_DEVICES:-all}"]
+              capabilities: [gpu]

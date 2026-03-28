@@ -1,0 +1,37 @@
+[project]
+name = "whisper-gui"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "python-multipart>=0.0.9",
+    "openai-whisper>=20231117",
+    "faster-whisper>=1.0.3",
+    "librosa>=0.10.1",
+    "soundfile>=0.12.1",
+    "transformers>=0.45.0",
+    "accelerate>=0.30.0",
+    "huggingface-hub>=0.24.0",
+    # NeMo (git trunk required for nvidia/canary-qwen-2.5b SALM support).
+    # See [tool.uv.sources] below. Only used when TRANSCRIPTION_ENGINE=canary.
+    "nemo_toolkit[asr]",
+    # torch and torchaudio come from the PyTorch CUDA index — see [tool.uv.sources].
+    # For local development on macOS/CPU: remove the marker and change the index url.
+    "torch>=2.6.0",
+    "torchaudio>=2.6.0",
+]
+
+[tool.uv.sources]
+# On Linux (Docker) use the CUDA 12.6 wheels. On macOS/Windows fall back to
+# PyPI which serves the appropriate CPU or MPS build automatically.
+torch = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+torchaudio = [{ index = "pytorch-cu126", marker = "sys_platform == 'linux'" }]
+# NeMo git trunk — required for SALM (canary-qwen-2.5b). The stable PyPI release
+# does not yet include the SALM class needed by that model.
+nemo_toolkit = { git = "https://github.com/NVIDIA/NeMo.git" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
