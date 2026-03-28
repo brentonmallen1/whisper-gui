@@ -1,0 +1,8 @@
+# Canary/NeMo override — merge when TRANSCRIPTION_ENGINE=canary.
+# Run with:  docker compose -f docker-compose.yml -f docker-compose.canary.yml up --build
+# Or combine with GPU:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.canary.yml up --build
+services:
+  whisper-gui:
+    build:
+      args:
+        INSTALL_CANARY: "true"

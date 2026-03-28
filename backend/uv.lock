@@ -4880,7 +4880,6 @@ dependencies = [
     { name = "faster-whisper" },
     { name = "huggingface-hub" },
     { name = "librosa" },
-    { name = "nemo-toolkit", extra = ["asr"] },
     { name = "openai-whisper" },
     { name = "python-multipart" },
     { name = "soundfile" },
@@ -4892,6 +4891,11 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
+[package.optional-dependencies]
+canary = [
+    { name = "nemo-toolkit", extra = ["asr"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.30.0" },
@@ -4899,7 +4903,7 @@ requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0.3" },
     { name = "huggingface-hub", specifier = ">=0.24.0" },
     { name = "librosa", specifier = ">=0.10.1" },
-    { name = "nemo-toolkit", extras = ["asr"], git = "https://github.com/NVIDIA/NeMo.git" },
+    { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'canary'", git = "https://github.com/NVIDIA/NeMo.git" },
     { name = "openai-whisper", specifier = ">=20231117" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "soundfile", specifier = ">=0.12.1" },
@@ -4910,6 +4914,7 @@ requires-dist = [
     { name = "transformers", specifier = ">=0.45.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]
+provides-extras = ["canary"]
 
 [[package]]
 name = "whisper-normalizer"

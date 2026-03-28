@@ -31,7 +31,14 @@ RUN uv pip install \
 # Copy pyproject.toml and uv.lock before source files so this layer is only
 # invalidated when dependencies change, not on every code edit.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project
+
+# TRANSCRIPTION_ENGINE=canary requires NeMo (heavy). Skip it otherwise.
+ARG INSTALL_CANARY=false
+RUN if [ "$INSTALL_CANARY" = "true" ]; then \
+      uv sync --frozen --no-install-project --extra canary; \
+    else \
+      uv sync --frozen --no-install-project; \
+    fi
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY . .

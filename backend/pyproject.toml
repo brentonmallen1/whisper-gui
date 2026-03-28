@@ -13,14 +13,16 @@ dependencies = [
     "transformers>=0.45.0",
     "accelerate>=0.30.0",
     "huggingface-hub>=0.24.0",
-    # NeMo (git trunk required for nvidia/canary-qwen-2.5b SALM support).
-    # See [tool.uv.sources] below. Only used when TRANSCRIPTION_ENGINE=canary.
-    "nemo_toolkit[asr]",
     # torch and torchaudio come from the PyTorch CUDA index — see [tool.uv.sources].
     # For local development on macOS/CPU: remove the marker and change the index url.
     "torch>=2.6.0",
     "torchaudio>=2.6.0",
 ]
+
+[project.optional-dependencies]
+# NeMo (git trunk required for nvidia/canary-qwen-2.5b SALM support).
+# Install with: uv sync --extra canary
+canary = ["nemo_toolkit[asr]"]
 
 [tool.uv.sources]
 # On Linux (Docker) use the CUDA 12.6 wheels. On macOS/Windows fall back to
