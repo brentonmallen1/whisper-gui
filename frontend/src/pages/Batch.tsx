@@ -3,7 +3,6 @@ import { ArrowLeft, Layers, Upload, X, CheckCircle, AlertCircle, Loader, Play, T
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import * as api from '../api/client';
-import type { Prompt } from '../types';
 import './Batch.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────
