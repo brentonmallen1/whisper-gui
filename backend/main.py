@@ -20,6 +20,9 @@ if "HF_HOME" not in os.environ:
     os.environ["HF_HOME"] = str(_CACHE_BASE / "models" / "hf")
 if "WHISPER_DOWNLOAD_ROOT" not in os.environ:
     os.environ["WHISPER_DOWNLOAD_ROOT"] = str(_CACHE_BASE / "models" / "whisper")
+# TORCH_HOME — used by older demucs versions / torch.hub downloads
+if "TORCH_HOME" not in os.environ:
+    os.environ["TORCH_HOME"] = str(_CACHE_BASE / "models" / "torch")
 # ──────────────────────────────────────────────────────────────────────────
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -31,6 +34,7 @@ from db import init_db, get_all_settings, update_settings as db_update_settings
 from llm import OllamaClient
 from llm.prompts import get_prompt
 from transcriber import load_engine
+from audio import AudioPipeline, EnhancementOptions, get_model_status, download_model
 
 _STATIC_DIR = Path(__file__).parent / "static"
 
@@ -399,6 +403,47 @@ async def ollama_models(_: bool = Depends(verify_auth)):
     return {"models": models}
 
 
+# ── Audio enhancement models ───────────────────────────────────────────────
+
+@app.get("/api/audio/models")
+async def get_audio_models(_: bool = Depends(verify_auth)):
+    """
+    Return package installation and weight-download status for each
+    audio enhancement model.
+    Shape: { "deepfilternet": {"package": bool, "weights": bool}, ... }
+    """
+    return get_model_status()
+
+
+class DownloadModelsRequest(BaseModel):
+    models: list[str]   # e.g. ["deepfilternet", "demucs", "lavasr"]
+
+
+@app.post("/api/audio/models/download")
+async def download_audio_models(req: DownloadModelsRequest, _: bool = Depends(verify_auth)):
+    """
+    Download model weights for one or more enhancement models.
+    Streams SSE progress events; each model downloads sequentially.
+
+    Events:
+      {"model": "...", "status": "downloading"}
+      {"model": "...", "status": "done"}
+      {"model": "...", "status": "error", "error": "..."}
+      [DONE]
+    """
+    async def event_stream():
+        for name in req.models:
+            yield f"data: {json.dumps({'model': name, 'status': 'downloading'})}\n\n"
+            try:
+                await asyncio.to_thread(download_model, name)
+                yield f"data: {json.dumps({'model': name, 'status': 'done'})}\n\n"
+            except Exception as exc:
+                yield f"data: {json.dumps({'model': name, 'status': 'error', 'error': str(exc)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
 # ── Summarization ──────────────────────────────────────────────────────────
 
 class SummarizeRequest(BaseModel):
@@ -501,20 +546,24 @@ _SSE_HEADERS = {"X-Accel-Buffering": "no", "Cache-Control": "no-cache"}
 
 @app.post("/api/summarize/file")
 async def summarize_file(
-    source: str       = Form(...),         # "audio" | "pdf"
-    mode: str         = Form("summary"),
-    file: UploadFile  = File(...),
-    _: bool           = Depends(verify_auth),
+    source:            str        = Form(...),         # "audio" | "pdf"
+    mode:              str        = Form("summary"),
+    file:              UploadFile = File(...),
+    enhance_normalize: bool       = Form(False),
+    enhance_denoise:   bool       = Form(False),
+    enhance_isolate:   bool       = Form(False),
+    enhance_upsample:  bool       = Form(False),
+    _: bool = Depends(verify_auth),
 ):
     """
     Upload a file and stream an AI summary via SSE.
 
-    source="audio"  — audio or video file → Whisper → LLM
+    source="audio"  — audio or video file → (optional enhancement) → Whisper → LLM
     source="pdf"    — PDF file → pdfplumber → LLM
     """
-    from extractors.audio   import AudioExtractor
-    from extractors.video   import VideoExtractor
-    from extractors.pdf     import PDFExtractor
+    from extractors.audio import AudioExtractor
+    from extractors.video import VideoExtractor
+    from extractors.pdf   import PDFExtractor
 
     contents = await file.read()
     suffix   = Path(file.filename or "upload").suffix.lower()
@@ -522,15 +571,23 @@ async def summarize_file(
     tmp = Path(tempfile.mktemp(suffix=suffix))
     tmp.write_bytes(contents)
 
+    opts = EnhancementOptions(
+        normalize=enhance_normalize,
+        denoise  =enhance_denoise,
+        isolate  =enhance_isolate,
+        upsample =enhance_upsample,
+    )
+    pipeline = AudioPipeline() if opts.any_active else None
+
     async def event_stream():
         try:
             if source == "pdf":
                 extractor = PDFExtractor()
             elif source == "audio":
                 if suffix in _VIDEO_EXTENSIONS:
-                    extractor = VideoExtractor(engine=_engine)
+                    extractor = VideoExtractor(engine=_engine, pipeline=pipeline, options=opts)
                 else:
-                    extractor = AudioExtractor(engine=_engine)
+                    extractor = AudioExtractor(engine=_engine, pipeline=pipeline, options=opts)
             else:
                 yield f"data: {json.dumps({'error': f'Unknown source type: {source}'})}\n\n"
                 yield "data: [DONE]\n\n"
@@ -584,11 +641,34 @@ async def summarize_url(req: SummarizeUrlRequest, _: bool = Depends(verify_auth)
 
 
 # ── Transcription ──────────────────────────────────────────────────────────
-def _run_transcription(job_id: str, audio_path: Path) -> None:
+def _run_transcription(
+    job_id: str,
+    audio_path: Path,
+    options: EnhancementOptions | None = None,
+) -> None:
+    enhanced = audio_path
+
+    # Run enhancement pipeline first (if any stages are active)
+    if options and options.any_active:
+        def _status(phase: str, detail: str) -> None:
+            with _lock:
+                _jobs[job_id]["status"]        = "enhancing"
+                _jobs[job_id]["status_detail"] = detail
+
+        try:
+            pipeline = AudioPipeline()
+            enhanced = pipeline.run_sync(audio_path, options, _status)
+        except Exception as exc:
+            with _lock:
+                _jobs[job_id]["status"] = "error"
+                _jobs[job_id]["error"]  = f"Enhancement failed: {exc}"
+            return
+
     with _lock:
         _jobs[job_id]["status"] = "processing"
+
     try:
-        result = _engine.transcribe(str(audio_path))
+        result = _engine.transcribe(str(enhanced))
         with _lock:
             _jobs[job_id]["status"] = "done"
             _jobs[job_id]["result"] = result
@@ -596,6 +676,9 @@ def _run_transcription(job_id: str, audio_path: Path) -> None:
         with _lock:
             _jobs[job_id]["status"] = "error"
             _jobs[job_id]["error"]  = str(exc)
+    finally:
+        if enhanced != audio_path:
+            enhanced.unlink(missing_ok=True)
 
 
 def _sanitize_filename(filename: str) -> str:
@@ -606,7 +689,11 @@ def _sanitize_filename(filename: str) -> str:
 @app.post("/api/transcribe")
 async def transcribe(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file:              UploadFile = File(...),
+    enhance_normalize: bool       = Form(False),
+    enhance_denoise:   bool       = Form(False),
+    enhance_isolate:   bool       = Form(False),
+    enhance_upsample:  bool       = Form(False),
     _: bool = Depends(verify_auth),
 ):
     if _engine_status != "ready":
@@ -644,16 +731,24 @@ async def transcribe(
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }))
 
+    opts = EnhancementOptions(
+        normalize=enhance_normalize,
+        denoise  =enhance_denoise,
+        isolate  =enhance_isolate,
+        upsample =enhance_upsample,
+    )
+
     with _lock:
         _jobs[job_id] = {
-            "status":     "pending",
-            "result":     None,
-            "error":      None,
-            "filename":   file.filename,
-            "audio_path": str(audio_path),
+            "status":        "pending",
+            "status_detail": "",
+            "result":        None,
+            "error":         None,
+            "filename":      file.filename,
+            "audio_path":    str(audio_path),
         }
 
-    background_tasks.add_task(_run_transcription, job_id, audio_path)
+    background_tasks.add_task(_run_transcription, job_id, audio_path, opts)
     return {"job_id": job_id}
 
 
@@ -710,10 +805,18 @@ async def list_files(_: bool = Depends(verify_auth)):
     return files
 
 
+class RetranscribeRequest(BaseModel):
+    enhance_normalize: bool = False
+    enhance_denoise:   bool = False
+    enhance_isolate:   bool = False
+    enhance_upsample:  bool = False
+
+
 @app.post("/api/retranscribe/{job_id}")
 async def retranscribe(
     job_id: str,
     background_tasks: BackgroundTasks,
+    req: RetranscribeRequest = RetranscribeRequest(),
     _: bool = Depends(verify_auth),
 ):
     if _engine_status != "ready":
@@ -728,17 +831,25 @@ async def retranscribe(
     if not audio_path.exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
+    opts = EnhancementOptions(
+        normalize=req.enhance_normalize,
+        denoise  =req.enhance_denoise,
+        isolate  =req.enhance_isolate,
+        upsample =req.enhance_upsample,
+    )
+
     new_job_id = str(uuid.uuid4())
     with _lock:
         _jobs[new_job_id] = {
-            "status":     "pending",
-            "result":     None,
-            "error":      None,
-            "filename":   meta.get("filename"),
-            "audio_path": str(audio_path),
+            "status":        "pending",
+            "status_detail": "",
+            "result":        None,
+            "error":         None,
+            "filename":      meta.get("filename"),
+            "audio_path":    str(audio_path),
         }
 
-    background_tasks.add_task(_run_transcription, new_job_id, audio_path)
+    background_tasks.add_task(_run_transcription, new_job_id, audio_path, opts)
     return {"job_id": new_job_id}
 
 

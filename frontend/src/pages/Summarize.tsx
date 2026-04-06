@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ArrowLeft, Sparkles, Copy, Download, RotateCcw,
   Mic, Youtube, Globe, FileText, File as FileIcon,
@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
+import type { AudioModelMap, EnhancementOptions } from '../types';
+import EnhancementPanel, { DEFAULT_ENHANCEMENT } from '../components/EnhancementPanel';
 import './Summarize.css';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -134,10 +136,17 @@ export default function Summarize() {
   const [youtubeUrl,     setYoutubeUrl]     = useState('');
   const [urlInput,       setUrlInput]       = useState('');
   const [preferCaptions, setPreferCaptions] = useState(true);
+  const [enhancement,    setEnhancement]    = useState<EnhancementOptions>(DEFAULT_ENHANCEMENT);
+  const [audioModels,    setAudioModels]    = useState<AudioModelMap | undefined>(undefined);
 
   // ── Thinking-block parser refs ────────────────────────────────────────────
   const rawBufferRef  = useRef('');
   const thinkDoneRef  = useRef(false);
+
+  // Load audio model status on mount
+  useEffect(() => {
+    api.getAudioModels().then(setAudioModels).catch(() => {});
+  }, []);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -221,7 +230,7 @@ export default function Summarize() {
         await api.summarize(content.trim(), mode, null, onChunk, onError, onDone);
         break;
       case 'audio':
-        await api.summarizeFile(audioFile!, 'audio', mode, onPhase, onChunk, onError, onDone);
+        await api.summarizeFile(audioFile!, 'audio', mode, onPhase, onChunk, onError, onDone, enhancement);
         break;
       case 'pdf':
         await api.summarizeFile(pdfFile!, 'pdf', mode, onPhase, onChunk, onError, onDone);
@@ -320,15 +329,23 @@ export default function Summarize() {
         )}
 
         {sourceTab === 'audio' && (
-          <DropZone
-            accept={AUDIO_ACCEPT}
-            file={audioFile}
-            onFile={setAudioFile}
-            label="Drop audio or video file here, or click to browse"
-            hint="MP3, WAV, M4A, FLAC, OGG, MP4, MKV, MOV, …"
-            icon={Mic}
-            disabled={isRunning}
-          />
+          <>
+            <DropZone
+              accept={AUDIO_ACCEPT}
+              file={audioFile}
+              onFile={setAudioFile}
+              label="Drop audio or video file here, or click to browse"
+              hint="MP3, WAV, M4A, FLAC, OGG, MP4, MKV, MOV, …"
+              icon={Mic}
+              disabled={isRunning}
+            />
+            <EnhancementPanel
+              value={enhancement}
+              onChange={setEnhancement}
+              models={audioModels}
+              disabled={isRunning}
+            />
+          </>
         )}
 
         {sourceTab === 'pdf' && (

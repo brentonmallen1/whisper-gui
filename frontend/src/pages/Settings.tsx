@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Save, RefreshCw, AlertTriangle, Check, Wifi, WifiOff, Loader } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw, AlertTriangle, Check, Wifi, WifiOff, Loader, Download } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
-import type { Capabilities, OllamaModel, Settings as SettingsType } from '../types';
+import type { AudioModelMap, Capabilities, OllamaModel, Settings as SettingsType } from '../types';
 import './Settings.css';
 
-type Section = 'transcription' | 'application' | 'security' | 'ollama';
+type Section = 'transcription' | 'application' | 'security' | 'ollama' | 'enhancement';
+
+const AUDIO_MODELS: { key: string; label: string; description: string }[] = [
+  { key: 'deepfilternet', label: 'DeepFilterNet',  description: 'Noise reduction' },
+  { key: 'demucs',        label: 'Demucs',         description: 'Vocal isolation (htdemucs)' },
+  { key: 'lavasr',        label: 'LavaSR',         description: 'Audio super-resolution to 48kHz' },
+];
 
 const ENGINE_OPTIONS = [
   { value: 'faster-whisper', label: 'Faster Whisper (recommended)' },
@@ -50,6 +56,12 @@ export default function Settings() {
   const [testingConn, setTestingConn]         = useState(false);
   const [connStatus, setConnStatus]           = useState<{ ok: boolean; message: string } | null>(null);
 
+  // Audio enhancement models
+  const [audioModels, setAudioModels]         = useState<AudioModelMap | null>(null);
+  const [audioModelsLoading, setAudioModelsLoading] = useState(false);
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [downloadMsg, setDownloadMsg]         = useState<Record<string, string>>({});
+
   const loadSettings = useCallback(async () => {
     setLoading(true);
     try {
@@ -81,6 +93,40 @@ export default function Settings() {
   useEffect(() => {
     if (section === 'ollama') loadOllamaModels();
   }, [section, loadOllamaModels]);
+
+  const loadAudioModels = useCallback(async () => {
+    setAudioModelsLoading(true);
+    try {
+      setAudioModels(await api.getAudioModels());
+    } catch {
+      setAudioModels(null);
+    } finally {
+      setAudioModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (section === 'enhancement') loadAudioModels();
+  }, [section, loadAudioModels]);
+
+  const handleDownloadModel = async (modelKey: string) => {
+    setDownloadingModel(modelKey);
+    setDownloadMsg(prev => ({ ...prev, [modelKey]: 'Starting download…' }));
+    await api.downloadAudioModels(
+      [modelKey],
+      (_model, _status, message) => {
+        setDownloadMsg(prev => ({ ...prev, [modelKey]: message }));
+      },
+      async () => {
+        setDownloadingModel(null);
+        await loadAudioModels();
+      },
+      (err) => {
+        setDownloadMsg(prev => ({ ...prev, [modelKey]: `Error: ${err}` }));
+        setDownloadingModel(null);
+      },
+    );
+  };
 
   const set = (key: keyof SettingsType, value: string) => {
     setDraft(d => ({ ...d, [key]: value }));
@@ -181,6 +227,7 @@ export default function Settings() {
               [
                 ['transcription', 'Transcription'],
                 ['ollama',        'Ollama (AI)'],
+                ['enhancement',  'Enhancement'],
                 ['application',  'Application'],
                 ['security',     'Security'],
               ] as [Section, string][]
@@ -419,6 +466,98 @@ export default function Settings() {
                     />
                   </div>
 
+                </div>
+              </div>
+            )}
+
+            {/* ── Enhancement ────────────────────────────────────────── */}
+            {section === 'enhancement' && (
+              <div className="settings-section">
+                <div className="settings-section-header">
+                  <h2 className="settings-section-title">Audio Enhancement</h2>
+                  <p className="settings-section-desc">
+                    Default enhancement stages applied before transcription. Can be overridden per-job.
+                  </p>
+                </div>
+
+                <div className="settings-fields">
+                  {/* Default toggles */}
+                  {[
+                    { key: 'enhance_normalize' as keyof SettingsType, label: 'Normalize by default', hint: 'EBU R128 loudness normalization via ffmpeg' },
+                    { key: 'enhance_denoise'   as keyof SettingsType, label: 'Denoise by default',   hint: 'DeepFilterNet noise reduction' },
+                    { key: 'enhance_isolate'   as keyof SettingsType, label: 'Isolate vocals by default', hint: 'Demucs vocal isolation' },
+                    { key: 'enhance_upsample'  as keyof SettingsType, label: 'Upsample by default',  hint: 'LavaSR audio super-resolution to 48kHz' },
+                  ].map(({ key, label, hint }) => (
+                    <div key={key} className="settings-field">
+                      <div className="settings-toggle-row">
+                        <div>
+                          <p className="settings-label" style={{ marginBottom: 2 }}>{label}</p>
+                          <p className="settings-label-hint" style={{ margin: 0 }}>{hint}</p>
+                        </div>
+                        <button
+                          className={`settings-toggle ${d[key] === 'true' ? 'on' : ''}`}
+                          role="switch"
+                          aria-checked={d[key] === 'true'}
+                          onClick={() => set(key, d[key] === 'true' ? 'false' : 'true')}
+                        >
+                          <span className="settings-toggle-thumb" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Model status cards */}
+                  <div className="settings-field">
+                    <p className="settings-label">Enhancement Models</p>
+                    <p className="settings-label-hint" style={{ marginBottom: 8 }}>
+                      Models are downloaded to the configured models directory on first use, or pre-download below.
+                    </p>
+                    {audioModelsLoading && <p className="settings-label-hint">Loading model status…</p>}
+                    {!audioModelsLoading && audioModels && (
+                      <div className="settings-model-cards">
+                        {AUDIO_MODELS.map(m => {
+                          const status = audioModels[m.key];
+                          const isDownloading = downloadingModel === m.key;
+                          const msg = downloadMsg[m.key];
+                          return (
+                            <div key={m.key} className="settings-model-card">
+                              <div className="settings-model-info">
+                                <span className="settings-model-name">{m.label}</span>
+                                <span className="settings-model-desc">{m.description}</span>
+                              </div>
+                              <div className="settings-model-status">
+                                {!status?.package ? (
+                                  <span className="settings-model-badge settings-model-badge--missing">not installed</span>
+                                ) : status.weights ? (
+                                  <span className="settings-model-badge settings-model-badge--ok">
+                                    <Check size={11} aria-hidden="true" /> ready
+                                  </span>
+                                ) : (
+                                  <span className="settings-model-badge settings-model-badge--warn">weights missing</span>
+                                )}
+                              </div>
+                              {status?.package && !status.weights && (
+                                <button
+                                  className="settings-download-btn"
+                                  onClick={() => handleDownloadModel(m.key)}
+                                  disabled={downloadingModel !== null}
+                                  type="button"
+                                >
+                                  {isDownloading
+                                    ? <Loader size={13} className="spinning" aria-hidden="true" />
+                                    : <Download size={13} aria-hidden="true" />}
+                                  {isDownloading ? (msg || 'Downloading…') : 'Download'}
+                                </button>
+                              )}
+                              {isDownloading && msg && (
+                                <p className="settings-model-msg">{msg}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

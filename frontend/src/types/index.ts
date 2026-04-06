@@ -1,7 +1,8 @@
-export type JobStatus = 'pending' | 'processing' | 'done' | 'error';
+export type JobStatus = 'pending' | 'enhancing' | 'processing' | 'done' | 'error';
 
 export interface Job {
   status: JobStatus;
+  status_detail: string;
   result: string | null;
   error: string | null;
   filename: string | null;
@@ -44,6 +45,11 @@ export interface Settings {
   ollama_timeout: string;
   ollama_thinking_enabled: string;
   ollama_token_budget: string;
+  // Enhancement defaults
+  enhance_normalize: string;
+  enhance_denoise: string;
+  enhance_isolate: string;
+  enhance_upsample: string;
 }
 
 export interface EngineCapability {
@@ -61,6 +67,20 @@ export interface OllamaModel {
   size: number;
   parameter_size: string;
 }
+
+export interface EnhancementOptions {
+  normalize: boolean;
+  denoise:   boolean;
+  isolate:   boolean;
+  upsample:  boolean;
+}
+
+export interface ModelStatus {
+  package: boolean;
+  weights: boolean;
+}
+
+export type AudioModelMap = Record<string, ModelStatus>;
 
 export interface SettingsUpdateResponse {
   settings: Settings;

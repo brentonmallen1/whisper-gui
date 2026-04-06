@@ -410,6 +410,111 @@
   to { transform: rotate(360deg); }
 }
 
+/* ── Enhancement: model cards ─────────────────────────────────────────── */
+.settings-model-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-model-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.settings-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-model-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-model-desc {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.settings-model-status {
+  flex-shrink: 0;
+}
+
+.settings-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.73rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.settings-model-badge--ok {
+  color: var(--success);
+  background: rgba(26, 158, 74, 0.1);
+  border: 1px solid rgba(26, 158, 74, 0.25);
+}
+
+.settings-model-badge--warn {
+  color: var(--warning, #d97706);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+.settings-model-badge--missing {
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+}
+
+.settings-download-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.settings-download-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.settings-download-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.settings-model-msg {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0;
+  width: 100%;
+}
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .settings-page {

@@ -2,10 +2,14 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, Upload, Copy, Download, Edit3, RotateCcw, Mic } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
-import type { FileMeta } from '../types';
+import type { AudioModelMap, EnhancementOptions, FileMeta } from '../types';
+import EnhancementPanel, { DEFAULT_ENHANCEMENT } from '../components/EnhancementPanel';
 import './Transcribe.css';
 
-const ACCEPTED_EXTENSIONS = ['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.webm', '.opus', '.aac', '.wma'];
+const ACCEPTED_EXTENSIONS = [
+  '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.webm', '.opus', '.aac', '.wma',
+  '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.m4v',
+];
 const ACCEPTED_MIME = ACCEPTED_EXTENSIONS.join(',');
 const POLL_INTERVAL_MS = 1200;
 
@@ -25,6 +29,8 @@ export default function Transcribe() {
   const [isDragging, setIsDragging]       = useState(false);
   const [files, setFiles]                 = useState<FileMeta[]>([]);
   const [filesLoading, setFilesLoading]   = useState(false);
+  const [enhancement, setEnhancement]     = useState<EnhancementOptions>(DEFAULT_ENHANCEMENT);
+  const [audioModels, setAudioModels]     = useState<AudioModelMap | undefined>(undefined);
 
   const jobIdRef   = useRef<string | null>(null);
   const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -40,6 +46,19 @@ export default function Transcribe() {
   }, []);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
+
+  // Load audio model status and settings defaults on mount
+  useEffect(() => {
+    api.getAudioModels().then(setAudioModels).catch(() => {});
+    api.getSettings().then(s => {
+      setEnhancement({
+        normalize: s.enhance_normalize === 'true',
+        denoise:   s.enhance_denoise   === 'true',
+        isolate:   s.enhance_isolate   === 'true',
+        upsample:  s.enhance_upsample  === 'true',
+      });
+    }).catch(() => {});
+  }, []);
 
   // ── File handling ──────────────────────────────────────────────────────
   const handleFile = useCallback((file: File) => {
@@ -58,7 +77,7 @@ export default function Transcribe() {
     setView('progress');
 
     try {
-      const { job_id } = await api.uploadFile(file);
+      const { job_id } = await api.uploadFile(file, enhancement);
       jobIdRef.current = job_id;
       setProgressLabel('Transcribing…');
       startPolling(job_id);
@@ -77,6 +96,8 @@ export default function Transcribe() {
         } else if (job.status === 'error') {
           stopPolling();
           showError(job.error ?? 'Transcription failed.');
+        } else if (job.status === 'enhancing') {
+          setProgressLabel(job.status_detail || 'Enhancing audio…');
         } else if (job.status === 'processing') {
           setProgressLabel('Transcribing… (this may take a moment)');
         }
@@ -170,7 +191,7 @@ export default function Transcribe() {
     setProgressLabel('Starting transcription…');
     setView('progress');
     try {
-      const { job_id } = await api.retranscribe(jobId);
+      const { job_id } = await api.retranscribe(jobId, enhancement);
       jobIdRef.current = job_id;
       setProgressLabel('Transcribing…');
       startPolling(job_id);
@@ -238,35 +259,42 @@ export default function Transcribe() {
 
             {/* Upload */}
             {view === 'upload' && (
-              <div
-                className={`transcribe-dropzone ${isDragging ? 'dragging' : ''}`}
-                onDragOver={onDragOver}
-                onDragLeave={onDragLeave}
-                onDrop={onDrop}
-                onClick={() => fileInputRef.current?.click()}
-                role="button"
-                tabIndex={0}
-                aria-label="Drop audio file or click to browse"
-                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
-              >
-                <Upload size={32} className="transcribe-dropzone-icon" aria-hidden="true" />
-                <p className="transcribe-dropzone-title">Drag &amp; drop audio here</p>
-                <p className="transcribe-dropzone-sub">or click to browse</p>
-                <p className="transcribe-dropzone-formats">
-                  MP3 · WAV · M4A · FLAC · OGG · WEBM · OPUS · AAC
-                </p>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={ACCEPTED_MIME}
-                  aria-hidden="true"
-                  hidden
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFile(file);
-                  }}
+              <>
+                <div
+                  className={`transcribe-dropzone ${isDragging ? 'dragging' : ''}`}
+                  onDragOver={onDragOver}
+                  onDragLeave={onDragLeave}
+                  onDrop={onDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Drop audio or video file or click to browse"
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+                >
+                  <Upload size={32} className="transcribe-dropzone-icon" aria-hidden="true" />
+                  <p className="transcribe-dropzone-title">Drag &amp; drop audio or video here</p>
+                  <p className="transcribe-dropzone-sub">or click to browse</p>
+                  <p className="transcribe-dropzone-formats">
+                    MP3 · WAV · M4A · FLAC · OGG · WEBM · OPUS · AAC · MP4 · MKV · MOV
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ACCEPTED_MIME}
+                    aria-hidden="true"
+                    hidden
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFile(file);
+                    }}
+                  />
+                </div>
+                <EnhancementPanel
+                  value={enhancement}
+                  onChange={setEnhancement}
+                  models={audioModels}
                 />
-              </div>
+              </>
             )}
 
             {/* Progress */}
