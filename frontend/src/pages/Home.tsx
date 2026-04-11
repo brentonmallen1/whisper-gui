@@ -11,6 +11,7 @@ import {
   Rss,
   GitBranch,
   Download,
+  Volume2,
 } from 'lucide-react';
 import ToolCard from '../components/ToolCard';
 import './Home.css';
@@ -71,6 +72,12 @@ export default function Home() {
               title="Audio Enhance"
               description="Improve audio quality — noise reduction, vocal isolation, super-resolution."
               href="/enhance"
+            />
+            <ToolCard
+              icon={Volume2}
+              title="Text-to-Speech"
+              description="Convert text to natural-sounding speech with Kokoro TTS. Choose from American and British voices."
+              href="/tts"
             />
             <ToolCard
               icon={GitBranch}

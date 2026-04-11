@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Save, RefreshCw, AlertTriangle, Check, Wifi, WifiOff, Loader, Download } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, Save, RefreshCw, AlertTriangle, Check, Wifi, WifiOff, Loader, Download, Play } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import type { AudioModelMap, Capabilities, OllamaModel, Settings as SettingsType, TTSStatus, TTSVoiceMap } from '../types';
 import './Settings.css';
 
-type Section = 'transcription' | 'application' | 'security' | 'ollama' | 'enhancement' | 'tts';
+type Section = 'transcription' | 'application' | 'security' | 'ollama' | 'enhancement' | 'tts' | 'youtube';
 
 const AUDIO_MODELS: { key: string; label: string; description: string }[] = [
   { key: 'deepfilternet', label: 'DeepFilterNet',  description: 'Noise reduction' },
@@ -68,6 +68,9 @@ export default function Settings() {
   const [ttsStatusLoading, setTtsStatusLoading] = useState(false);
   const [downloadingTts, setDownloadingTts]   = useState(false);
   const [ttsDownloadMsg, setTtsDownloadMsg]   = useState('');
+  const [previewingVoice, setPreviewingVoice] = useState(false);
+  const previewAudioRef                       = useRef<HTMLAudioElement | null>(null);
+  const previewBlobUrlRef                     = useRef<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -174,6 +177,35 @@ export default function Settings() {
     );
   };
 
+  const handlePreviewVoice = async (voice: string) => {
+    // Stop any currently playing preview
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewBlobUrlRef.current) {
+      URL.revokeObjectURL(previewBlobUrlRef.current);
+      previewBlobUrlRef.current = null;
+    }
+
+    setPreviewingVoice(true);
+    try {
+      const blob = await api.synthesizeSpeech(
+        "The quick brown fox jumps over the lazy dog. How vexingly quick daft zebras jump.",
+        voice,
+      );
+      const url = URL.createObjectURL(blob);
+      previewBlobUrlRef.current = url;
+      const audio = new Audio(url);
+      audio.onended = () => setPreviewingVoice(false);
+      audio.onerror = () => setPreviewingVoice(false);
+      previewAudioRef.current = audio;
+      await audio.play();
+    } catch {
+      setPreviewingVoice(false);
+    }
+  };
+
   const set = (key: keyof SettingsType, value: string) => {
     setDraft(d => ({ ...d, [key]: value }));
   };
@@ -275,6 +307,7 @@ export default function Settings() {
                 ['ollama',        'Ollama (AI)'],
                 ['enhancement',  'Enhancement'],
                 ['tts',           'Text-to-Speech'],
+                ['youtube',       'YouTube'],
                 ['application',  'Application'],
                 ['security',     'Security'],
               ] as [Section, string][]
@@ -647,39 +680,52 @@ export default function Settings() {
                       Default Voice
                       <span className="settings-label-hint">Voice used when reading results aloud</span>
                     </label>
-                    <select
-                      id="tts-voice"
-                      className="settings-select"
-                      value={d.tts_voice ?? 'af_bella'}
-                      onChange={e => set('tts_voice', e.target.value)}
-                    >
-                      {Object.keys(ttsVoices).length > 0 ? (
-                        <>
-                          <optgroup label="American Female">
-                            {Object.entries(ttsVoices).filter(([k]) => k.startsWith('af_')).map(([k, v]) => (
-                              <option key={k} value={k}>{v.name}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="American Male">
-                            {Object.entries(ttsVoices).filter(([k]) => k.startsWith('am_')).map(([k, v]) => (
-                              <option key={k} value={k}>{v.name}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="British Female">
-                            {Object.entries(ttsVoices).filter(([k]) => k.startsWith('bf_')).map(([k, v]) => (
-                              <option key={k} value={k}>{v.name}</option>
-                            ))}
-                          </optgroup>
-                          <optgroup label="British Male">
-                            {Object.entries(ttsVoices).filter(([k]) => k.startsWith('bm_')).map(([k, v]) => (
-                              <option key={k} value={k}>{v.name}</option>
-                            ))}
-                          </optgroup>
-                        </>
-                      ) : (
-                        <option value={d.tts_voice ?? 'af_bella'}>{d.tts_voice ?? 'af_bella'}</option>
-                      )}
-                    </select>
+                    <div className="settings-voice-row">
+                      <select
+                        id="tts-voice"
+                        className="settings-select"
+                        value={d.tts_voice ?? 'af_bella'}
+                        onChange={e => set('tts_voice', e.target.value)}
+                      >
+                        {Object.keys(ttsVoices).length > 0 ? (
+                          <>
+                            <optgroup label="American Female">
+                              {Object.entries(ttsVoices).filter(([k]) => k.startsWith('af_')).map(([k, v]) => (
+                                <option key={k} value={k}>{v.name}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="American Male">
+                              {Object.entries(ttsVoices).filter(([k]) => k.startsWith('am_')).map(([k, v]) => (
+                                <option key={k} value={k}>{v.name}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="British Female">
+                              {Object.entries(ttsVoices).filter(([k]) => k.startsWith('bf_')).map(([k, v]) => (
+                                <option key={k} value={k}>{v.name}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="British Male">
+                              {Object.entries(ttsVoices).filter(([k]) => k.startsWith('bm_')).map(([k, v]) => (
+                                <option key={k} value={k}>{v.name}</option>
+                              ))}
+                            </optgroup>
+                          </>
+                        ) : (
+                          <option value={d.tts_voice ?? 'af_bella'}>{d.tts_voice ?? 'af_bella'}</option>
+                        )}
+                      </select>
+                      <button
+                        className="settings-voice-preview-btn"
+                        title="Preview voice"
+                        disabled={previewingVoice || !ttsStatus?.weights}
+                        onClick={() => handlePreviewVoice(d.tts_voice ?? 'af_bella')}
+                        type="button"
+                      >
+                        {previewingVoice
+                          ? <Loader size={14} className="spinning" aria-hidden="true" />
+                          : <Play size={14} aria-hidden="true" />}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Model status */}
@@ -694,7 +740,7 @@ export default function Settings() {
                         <div className="settings-model-card">
                           <div className="settings-model-info">
                             <span className="settings-model-name">Kokoro-82M</span>
-                            <span className="settings-model-desc">Neural TTS, 48 English voices</span>
+                            <span className="settings-model-desc">Neural TTS, 28 English voices</span>
                           </div>
                           <div className="settings-model-status">
                             {!ttsStatus?.package ? (
@@ -725,6 +771,73 @@ export default function Settings() {
                           )}
                         </div>
                       </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── YouTube ────────────────────────────────────────────── */}
+            {section === 'youtube' && (
+              <div className="settings-section">
+                <div className="settings-section-header">
+                  <h2 className="settings-section-title">YouTube</h2>
+                  <p className="settings-section-desc">
+                    Provide your browser cookies to bypass rate limits, access age-restricted videos,
+                    and avoid bot detection. Export using a browser extension such as
+                    {' '}<a href="https://github.com/nicktantienern/cookies-txt" target="_blank" rel="noreferrer" className="settings-link">cookies.txt</a>{' '}
+                    (Chrome/Firefox) and paste the file contents below.
+                  </p>
+                </div>
+
+                <div className="settings-fields">
+                  <div className="settings-field">
+                    <div className="settings-cookies-header">
+                      <label className="settings-label" htmlFor="yt-cookies">
+                        Cookies (Netscape format)
+                      </label>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <label className="settings-upload-btn" title="Upload cookies.txt file">
+                          <input
+                            type="file"
+                            accept=".txt"
+                            style={{ display: 'none' }}
+                            onChange={e => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = ev => set('youtube_cookies', ev.target?.result as string ?? '');
+                              reader.readAsText(file);
+                              e.target.value = '';
+                            }}
+                          />
+                          <Download size={13} aria-hidden="true" />
+                          Upload file
+                        </label>
+                        {d.youtube_cookies && (
+                          <button
+                            className="settings-clear-btn"
+                            onClick={() => set('youtube_cookies', '')}
+                            type="button"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <textarea
+                      id="yt-cookies"
+                      className="settings-cookies-textarea"
+                      placeholder={"# Netscape HTTP Cookie File\n# Export from your browser using a cookies.txt extension\n.youtube.com\tTRUE\t/\tTRUE\t…"}
+                      value={d.youtube_cookies ?? ''}
+                      onChange={e => set('youtube_cookies', e.target.value)}
+                      rows={8}
+                      spellCheck={false}
+                    />
+                    {d.youtube_cookies && (
+                      <p className="settings-label-hint">
+                        {d.youtube_cookies.trim().split('\n').filter(l => l && !l.startsWith('#')).length} cookie entries saved.
+                      </p>
                     )}
                   </div>
                 </div>

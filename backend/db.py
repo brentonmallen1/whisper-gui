@@ -54,6 +54,8 @@ _DEFAULTS: dict[str, str] = {
     # Text-to-Speech
     "tts_enabled":       os.getenv("TTS_ENABLED", "true"),
     "tts_voice":         os.getenv("TTS_VOICE", "af_bella"),
+    # YouTube
+    "youtube_cookies":   os.getenv("YOUTUBE_COOKIES", ""),
 }
 
 

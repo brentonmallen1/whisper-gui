@@ -71,6 +71,8 @@ export interface Settings {
   // Text-to-Speech
   tts_enabled: string;
   tts_voice: string;
+  // YouTube
+  youtube_cookies: string;
 }
 
 export interface TTSVoice {

@@ -38,13 +38,21 @@ def get_tts_status() -> dict[str, bool]:
 
 
 def download_tts_model() -> None:
-    """Download Kokoro model weights. Raises RuntimeError if package not installed."""
+    """Download Kokoro model weights and all voice files. Raises RuntimeError if package not installed."""
     if not _pkg("kokoro"):
         raise RuntimeError(
             "kokoro package not installed. Install with: uv add kokoro soundfile"
         )
+    from huggingface_hub import hf_hub_download
     from kokoro import KPipeline  # noqa: F401
+
+    # Download model weights
     KPipeline(lang_code="a")  # 'a' = American English; triggers HF Hub download
+
+    # Pre-download all voice .pt files so they're ready without a per-voice fetch
+    from .voices import VOICES
+    for voice_id in VOICES:
+        hf_hub_download(repo_id=_KOKORO_REPO, filename=f"voices/{voice_id}.pt")
 
 
 class TTSEngine:

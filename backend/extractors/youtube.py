@@ -11,9 +11,14 @@ Also provides standalone download helpers used by the YouTube download tool:
   get_video_info()   — fetch metadata without downloading
   download_video()   — download video+audio, optionally remuxed
   download_audio()   — extract/convert audio to a target format
+
+All functions accept an optional `cookies` parameter (Netscape-format cookie
+text). When provided it is written to a temp file and passed to yt-dlp as
+`cookiefile`, enabling authenticated / rate-limit-bypassing requests.
 """
 
 import asyncio
+import contextlib
 import re
 import shutil
 import tempfile
@@ -22,14 +27,38 @@ from pathlib import Path
 from .base import StatusCallback
 
 
-# ── Standalone download helpers ────────────────────────────────────────────
+# ── Cookie helper ──────────────────────────────────────────────────────────────
 
-_VALID_VIDEO_FORMATS  = {"mp4", "webm", "mkv"}
-_VALID_AUDIO_FORMATS  = {"mp3", "m4a", "flac", "wav", "ogg", "opus"}
+@contextlib.contextmanager
+def _cookies_file(cookies_text: str | None):
+    """
+    Write Netscape-format cookie text to a temp file, yield the path, then
+    delete it. Yields None if cookies_text is empty so callers can always use
+    the same pattern:
+
+        with _cookies_file(cookies) as cf:
+            opts = {"cookiefile": cf, ...} if cf else {...}
+    """
+    if not cookies_text or not cookies_text.strip():
+        yield None
+        return
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write(cookies_text)
+        path = f.name
+    try:
+        yield path
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+# ── Standalone download helpers ────────────────────────────────────────────────
+
+_VALID_VIDEO_FORMATS   = {"mp4", "webm", "mkv"}
+_VALID_AUDIO_FORMATS   = {"mp3", "m4a", "flac", "wav", "ogg", "opus"}
 _VALID_VIDEO_QUALITIES = {"best", "2160", "1080", "720", "480", "360"}
 
 
-def get_video_info(url: str) -> dict:
+def get_video_info(url: str, cookies: str | None = None) -> dict:
     """
     Fetch video metadata without downloading.
     Returns: { title, duration_seconds, thumbnail, uploader }
@@ -37,16 +66,20 @@ def get_video_info(url: str) -> dict:
     """
     import yt_dlp
 
-    ydl_opts = {
-        "quiet":       True,
-        "no_warnings": True,
-        "skip_download": True,
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        try:
-            info = ydl.extract_info(url, download=False)
-        except Exception as exc:
-            raise ValueError(str(exc)) from exc
+    with _cookies_file(cookies) as cf:
+        ydl_opts: dict = {
+            "quiet":        True,
+            "no_warnings":  True,
+            "skip_download": True,
+        }
+        if cf:
+            ydl_opts["cookiefile"] = cf
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception as exc:
+                raise ValueError(str(exc)) from exc
 
     return {
         "title":            info.get("title", ""),
@@ -61,6 +94,7 @@ def download_video(
     output_dir: Path,
     quality: str = "best",
     fmt: str = "mp4",
+    cookies: str | None = None,
 ) -> Path:
     """
     Download video+audio and remux to the requested container/codec.
@@ -75,34 +109,30 @@ def download_video(
     if quality == "best":
         format_spec = "bestvideo+bestaudio/best"
     else:
-        # Prefer the target height; fall back to the next lower height available
         format_spec = (
             f"bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best"
         )
 
-    # Codec mapping for merge_output_format
-    # For mkv we just copy streams; for webm we prefer VP9; for mp4 H.264
-    merge_fmt = fmt
+    with _cookies_file(cookies) as cf:
+        ydl_opts: dict = {
+            "format":              format_spec,
+            "merge_output_format": fmt,
+            "outtmpl":             str(output_dir / "%(title)s.%(ext)s"),
+            "quiet":               True,
+            "no_warnings":         True,
+            "writethumbnail":      False,
+        }
+        if cf:
+            ydl_opts["cookiefile"] = cf
 
-    ydl_opts = {
-        "format":             format_spec,
-        "merge_output_format": merge_fmt,
-        "outtmpl":            str(output_dir / "%(title)s.%(ext)s"),
-        "quiet":              True,
-        "no_warnings":        True,
-        "writethumbnail":     False,
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
-        # yt-dlp may change the extension after merging
-        path = Path(filename)
-        if not path.exists():
-            # Fallback: search for any file that starts with the stem
-            candidates = list(output_dir.glob(f"{path.stem}.*"))
-            if candidates:
-                path = candidates[0]
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+            path = Path(filename)
+            if not path.exists():
+                candidates = list(output_dir.glob(f"{path.stem}.*"))
+                if candidates:
+                    path = candidates[0]
 
     return path
 
@@ -112,6 +142,7 @@ def download_audio(
     output_dir: Path,
     fmt: str = "mp3",
     quality: str = "192",
+    cookies: str | None = None,
 ) -> Path:
     """
     Download and extract audio in the requested format.
@@ -124,7 +155,6 @@ def download_audio(
     """
     import yt_dlp
 
-    # Map our format names to yt-dlp preferredcodec values
     codec_map = {
         "mp3":  "mp3",
         "m4a":  "m4a",
@@ -140,36 +170,38 @@ def download_audio(
     if not lossless and quality.isdigit():
         postprocessor["preferredquality"] = quality
 
-    ydl_opts = {
-        "format":          "bestaudio/best",
-        "outtmpl":         str(output_dir / "%(title)s.%(ext)s"),
-        "postprocessors":  [postprocessor],
-        "quiet":           True,
-        "no_warnings":     True,
-    }
+    with _cookies_file(cookies) as cf:
+        ydl_opts: dict = {
+            "format":         "bestaudio/best",
+            "outtmpl":        str(output_dir / "%(title)s.%(ext)s"),
+            "postprocessors": [postprocessor],
+            "quiet":          True,
+            "no_warnings":    True,
+        }
+        if cf:
+            ydl_opts["cookiefile"] = cf
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        # After post-processing the extension changes to the target format
-        stem = Path(ydl.prepare_filename(info)).stem
-        output_file = output_dir / f"{stem}.{fmt}"
-        if not output_file.exists():
-            # yt-dlp uses "vorbis" extension as "ogg", handle alias
-            alt = output_dir / f"{stem}.ogg" if fmt == "ogg" else None
-            if alt and alt.exists():
-                output_file = alt
-            else:
-                candidates = list(output_dir.glob(f"{stem}.*"))
-                if candidates:
-                    output_file = candidates[0]
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            stem = Path(ydl.prepare_filename(info)).stem
+            output_file = output_dir / f"{stem}.{fmt}"
+            if not output_file.exists():
+                alt = output_dir / f"{stem}.ogg" if fmt == "ogg" else None
+                if alt and alt.exists():
+                    output_file = alt
+                else:
+                    candidates = list(output_dir.glob(f"{stem}.*"))
+                    if candidates:
+                        output_file = candidates[0]
 
     return output_file
 
 
 class YouTubeExtractor:
-    def __init__(self, engine, prefer_captions: bool = True) -> None:
+    def __init__(self, engine, prefer_captions: bool = True, cookies: str | None = None) -> None:
         self.engine = engine
         self.prefer_captions = prefer_captions
+        self.cookies = cookies
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -199,18 +231,22 @@ class YouTubeExtractor:
         import yt_dlp
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            ydl_opts = {
-                "writeautomaticsub": True,
-                "writesubtitles": True,
-                "subtitleslangs": ["en", "en-US", "en-GB"],
-                "subtitlesformat": "vtt",
-                "skip_download": True,
-                "outtmpl": f"{tmpdir}/%(id)s.%(ext)s",
-                "quiet": True,
-                "no_warnings": True,
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+            with _cookies_file(self.cookies) as cf:
+                ydl_opts: dict = {
+                    "writeautomaticsub": True,
+                    "writesubtitles":    True,
+                    "subtitleslangs":    ["en", "en-US", "en-GB"],
+                    "subtitlesformat":   "vtt",
+                    "skip_download":     True,
+                    "outtmpl":           f"{tmpdir}/%(id)s.%(ext)s",
+                    "quiet":             True,
+                    "no_warnings":       True,
+                }
+                if cf:
+                    ydl_opts["cookiefile"] = cf
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
 
             vtt_files = list(Path(tmpdir).glob("*.vtt"))
             if not vtt_files:
@@ -240,7 +276,6 @@ class YouTubeExtractor:
             for line in lines:
                 if "-->" in line or re.match(r"^\d+$", line.strip()):
                     continue
-                # Strip inline timing tags and HTML
                 line = re.sub(r"<\d{2}:\d{2}:\d{2}\.\d{3}>", "", line)
                 line = re.sub(r"<[^>]+>", "", line)
                 line = line.strip()
@@ -259,18 +294,22 @@ class YouTubeExtractor:
         import yt_dlp
 
         tmpdir = Path(tempfile.mkdtemp())
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
-            "postprocessors": [
-                {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}
-            ],
-            "quiet": True,
-            "no_warnings": True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            video_id = info["id"]
+        with _cookies_file(self.cookies) as cf:
+            ydl_opts: dict = {
+                "format":  "bestaudio/best",
+                "outtmpl": str(tmpdir / "%(id)s.%(ext)s"),
+                "postprocessors": [
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3"}
+                ],
+                "quiet":       True,
+                "no_warnings": True,
+            }
+            if cf:
+                ydl_opts["cookiefile"] = cf
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_id = info["id"]
 
         return tmpdir / f"{video_id}.mp3", tmpdir
 

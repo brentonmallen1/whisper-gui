@@ -674,6 +674,7 @@ async def download_audio_models(req: DownloadModelsRequest, _: bool = Depends(ve
 # ── Text-to-Speech ────────────────────────────────────────────────────────
 
 from tts import TTSEngine, get_tts_status, download_tts_model, VOICES
+from tts.preprocess import preprocess_for_speech
 
 
 @app.get("/api/tts/status")
@@ -727,9 +728,10 @@ async def tts_synthesize(req: TTSSynthesizeRequest, _: bool = Depends(verify_aut
         raise HTTPException(status_code=400, detail="Text is required")
 
     voice = req.voice or _settings.get("tts_voice", "af_bella")
+    speech_text = preprocess_for_speech(req.text)
     engine = TTSEngine()
     try:
-        audio_bytes = await asyncio.to_thread(engine.synthesize, req.text, voice)
+        audio_bytes = await asyncio.to_thread(engine.synthesize, speech_text, voice)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -1031,7 +1033,7 @@ async def summarize_url(req: SummarizeUrlRequest, _: bool = Depends(verify_auth)
 
     async def event_stream():
         if req.source == "youtube":
-            extractor = YouTubeExtractor(engine=_engine, prefer_captions=req.prefer_captions)
+            extractor = YouTubeExtractor(engine=_engine, prefer_captions=req.prefer_captions, cookies=_settings.get("youtube_cookies") or None)
             source_arg = req.url
         elif req.source == "url":
             extractor = WebpageExtractor()
@@ -2117,11 +2119,11 @@ def _run_yt_download(job_id: str, req: YouTubeDownloadRequest) -> None:
             fmt = req.video_format if req.video_format in _VALID_VIDEO_FORMATS else "mp4"
             quality = req.video_quality if req.video_quality in _VALID_VIDEO_QUALITIES else "best"
             _status(f"Downloading {quality}p {fmt.upper()} video…")
-            output_path = download_video(req.url, tmpdir, quality=quality, fmt=fmt)
+            output_path = download_video(req.url, tmpdir, quality=quality, fmt=fmt, cookies=_settings.get("youtube_cookies") or None)
         else:
             fmt = req.audio_format if req.audio_format in _VALID_AUDIO_FORMATS else "mp3"
             _status(f"Downloading {fmt.upper()} audio…")
-            output_path = download_audio(req.url, tmpdir, fmt=fmt, quality=req.audio_quality)
+            output_path = download_audio(req.url, tmpdir, fmt=fmt, quality=req.audio_quality, cookies=_settings.get("youtube_cookies") or None)
 
         # Move to stable cache location
         dest = AUDIO_CACHE / f"{job_id}_{output_path.name}"
@@ -2146,7 +2148,7 @@ async def youtube_info(url: str = Query(...), _: bool = Depends(verify_auth)):
     """Fetch YouTube video metadata without downloading."""
     from extractors.youtube import get_video_info
     try:
-        info = await asyncio.to_thread(get_video_info, url)
+        info = await asyncio.to_thread(get_video_info, url, _settings.get("youtube_cookies") or None)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return info

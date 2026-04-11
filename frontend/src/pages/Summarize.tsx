@@ -4,13 +4,13 @@ import {
   ArrowLeft, Sparkles, Copy, Download, RotateCcw,
   Mic, Youtube, Globe, FileText, File as FileIcon, Image as ImageIcon,
   AlertTriangle, Upload, X, Code, MessageSquare, Send, Trash2, Languages,
+  Volume2, Loader,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import * as api from '../api/client';
 import type { AudioModelMap, ChatMessage, EnhancementOptions } from '../types';
 import EnhancementPanel, { DEFAULT_ENHANCEMENT } from '../components/EnhancementPanel';
 import MindMapDiagram from '../components/MindMapDiagram';
-import TTSPlayer from '../components/TTSPlayer';
 import { useSourceCache } from '../context/SourceCache';
 import './Summarize.css';
 
@@ -32,7 +32,7 @@ const SOURCE_TABS: { id: SourceTab; label: string; icon: React.ElementType }[] =
   { id: 'image',   label: 'Image',   icon: ImageIcon  },
 ];
 
-const TRANSCRIPT_MODE = { id: 'transcript', label: 'Transcript', hint: 'Raw transcription — no AI processing' };
+const TRANSCRIPT_MODE = { id: 'transcript', label: 'Transcript / Raw Text', hint: 'Raw transcription — no AI processing' };
 
 // Static fallback modes (used before prompts load from API)
 const DEFAULT_modes: { id: string; label: string; hint: string }[] = [
@@ -173,6 +173,17 @@ export default function Summarize() {
   const [ttsEnabled,     setTtsEnabled]     = useState(true);
   const [ttsVoice,       setTtsVoice]       = useState<string | undefined>(undefined);
 
+  // Persistent TTS audio player — lifted here so it survives mode/tab switches
+  const [ttsAudioUrl,    setTtsAudioUrl]    = useState<string | null>(null);
+  const [ttsLoading,     setTtsLoading]     = useState(false);
+  const [ttsLoadSrc,     setTtsLoadSrc]     = useState<'result' | 'translation' | null>(null);
+  const ttsBlobUrlRef = useRef<string | null>(null);
+
+  // Revoke audio blob URL on unmount
+  useEffect(() => {
+    return () => { if (ttsBlobUrlRef.current) URL.revokeObjectURL(ttsBlobUrlRef.current); };
+  }, []);
+
   // ── Translation state ─────────────────────────────────────────────────────
   const [translateLang,   setTranslateLang]   = useState('Spanish');
   const [translation,     setTranslation]     = useState('');
@@ -235,6 +246,8 @@ export default function Summarize() {
     setImageFile(null);
     setTranslation('');
     setTranslateState('idle');
+    if (ttsBlobUrlRef.current) { URL.revokeObjectURL(ttsBlobUrlRef.current); ttsBlobUrlRef.current = null; }
+    setTtsAudioUrl(null);
     rawBufferRef.current      = '';
     thinkDoneRef.current      = false;
     resultAccumRef.current    = '';
@@ -257,6 +270,24 @@ export default function Summarize() {
       () => setTranslateState('done'),
       msg => { setTranslateError(msg); setTranslateState('error'); },
     );
+  };
+
+  const handleReadAloud = async (text: string, src: 'result' | 'translation') => {
+    if (ttsBlobUrlRef.current) { URL.revokeObjectURL(ttsBlobUrlRef.current); ttsBlobUrlRef.current = null; }
+    setTtsAudioUrl(null);
+    setTtsLoading(true);
+    setTtsLoadSrc(src);
+    try {
+      const blob = await api.synthesizeSpeech(text, ttsVoice);
+      const url = URL.createObjectURL(blob);
+      ttsBlobUrlRef.current = url;
+      setTtsAudioUrl(url);
+    } catch {
+      // silently ignore — user can retry
+    } finally {
+      setTtsLoading(false);
+      setTtsLoadSrc(null);
+    }
   };
 
   const isRunning = ['extracting', 'transcribing', 'thinking', 'streaming'].includes(view);
@@ -370,7 +401,10 @@ export default function Summarize() {
       }
     };
 
-    const onExtracted = (extracted: string) => setSourceContent(extracted);
+    const onExtracted = (extracted: string) => {
+      setSourceContent(extracted);
+      setModeCache(prev => ({ ...prev, transcript: { result: extracted, reasoning: '' } }));
+    };
 
     // Build a cache key for extractable sources (URL-based and file-based)
     const fileCacheKey = (prefix: string, f: File) =>
@@ -399,10 +433,13 @@ export default function Summarize() {
     };
 
     switch (sourceTab) {
-      case 'text':
-        setSourceContent(content.trim());
-        await api.summarize(content.trim(), mode, null, onChunk, onError, onDone);
+      case 'text': {
+        const trimmed = content.trim();
+        setSourceContent(trimmed);
+        setModeCache(prev => ({ ...prev, transcript: { result: trimmed, reasoning: '' } }));
+        await api.summarize(trimmed, mode, null, onChunk, onError, onDone);
         break;
+      }
 
       case 'audio': {
         const key = fileCacheKey('audio', audioFile!);
@@ -749,6 +786,25 @@ export default function Summarize() {
           </button>
         </div>
 
+        {/* Persistent TTS audio player — survives mode/tab switches */}
+        {ttsEnabled && ttsAudioUrl && (
+          <div className="summarize-tts-bar">
+            <Volume2 size={14} className="summarize-tts-bar-icon" aria-hidden="true" />
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+            <audio className="summarize-tts-audio" src={ttsAudioUrl} controls autoPlay />
+            <button
+              className="summarize-tts-bar-close"
+              onClick={() => {
+                if (ttsBlobUrlRef.current) { URL.revokeObjectURL(ttsBlobUrlRef.current); ttsBlobUrlRef.current = null; }
+                setTtsAudioUrl(null);
+              }}
+              aria-label="Close audio player"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        )}
+
         {/* Results */}
         {view !== 'idle' && (
           <div className="summarize-result">
@@ -790,7 +846,17 @@ export default function Summarize() {
                     {isCopied ? 'Copied!' : 'Copy'}
                   </button>
                   {ttsEnabled && (
-                    <TTSPlayer text={result} voice={ttsVoice} />
+                    <button
+                      className="summarize-action-btn"
+                      onClick={() => handleReadAloud(result, 'result')}
+                      disabled={ttsLoading}
+                      title="Read aloud"
+                    >
+                      {ttsLoading && ttsLoadSrc === 'result'
+                        ? <><Loader size={13} className="summarize-tts-spin" aria-hidden="true" /> Generating…</>
+                        : <><Volume2 size={13} aria-hidden="true" /> Read Aloud</>
+                      }
+                    </button>
                   )}
                   {mode === 'mind_map' && !renderMarkdown && (
                     <button className="summarize-action-btn" onClick={downloadSvg}>
@@ -907,7 +973,17 @@ export default function Summarize() {
                 )}
                 {ttsEnabled && translateState === 'done' && translation && (
                   <div className="summarize-translate-tts">
-                    <TTSPlayer text={translation} voice={ttsVoice} />
+                    <button
+                      className="summarize-action-btn"
+                      onClick={() => handleReadAloud(translation, 'translation')}
+                      disabled={ttsLoading}
+                      title="Read aloud translation"
+                    >
+                      {ttsLoading && ttsLoadSrc === 'translation'
+                        ? <><Loader size={13} className="summarize-tts-spin" aria-hidden="true" /> Generating…</>
+                        : <><Volume2 size={13} aria-hidden="true" /> Read Aloud</>
+                      }
+                    </button>
                   </div>
                 )}
               </div>

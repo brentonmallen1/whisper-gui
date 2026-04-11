@@ -11,6 +11,7 @@ import Batch from './pages/Batch';
 import Feeds from './pages/Feeds';
 import Pipeline from './pages/Pipeline';
 import Download from './pages/Download';
+import TTS from './pages/TTS';
 import { SourceCacheProvider } from './context/SourceCache';
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="/feeds" element={<Feeds />} />
             <Route path="/pipeline" element={<Pipeline />} />
             <Route path="/download" element={<Download />} />
+            <Route path="/tts" element={<TTS />} />
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

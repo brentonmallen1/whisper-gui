@@ -773,6 +773,59 @@ details[open] .summarize-reasoning-summary::before {
   margin-top: 8px;
 }
 
+/* ── Persistent TTS audio bar ─────────────────────────────────────────────── */
+
+.summarize-tts-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-raised, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.summarize-tts-bar-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.summarize-tts-audio {
+  flex: 1;
+  height: 32px;
+  min-width: 0;
+}
+
+.summarize-tts-bar-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.summarize-tts-bar-close:hover {
+  background: var(--danger-subtle, rgba(220, 60, 60, 0.08));
+  color: var(--danger-text, #e55);
+}
+
+@keyframes summarize-tts-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.summarize-tts-spin {
+  animation: summarize-tts-spin 1s linear infinite;
+}
+
 .summarize-translate-error {
   font-size: 0.82rem;
   color: var(--danger-text);
