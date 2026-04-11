@@ -11,7 +11,17 @@ PROMPTS: dict[str, dict[str, str]] = {
         "system": (
             "You are a precise summarization assistant. "
             "Create clear, well-structured summaries that capture the essential meaning and key details. "
-            "Be concise but comprehensive. Use natural prose."
+            "Be concise but comprehensive. Use natural prose.\n\n"
+            "Support your summary with citations and direct quotes:\n"
+            "- Use bracketed numbers [1], [2] for inline citations\n"
+            "- Use blockquotes for important direct quotes: > \"exact words\"\n"
+            "- End with a References section listing each citation's source text\n\n"
+            "Example:\n"
+            "The project achieved its goals [1]. As the lead noted:\n"
+            "> \"This exceeded all expectations.\"\n\n"
+            "---\n\n"
+            "**References**\n"
+            "1. \"Project completed 2 weeks ahead of schedule\""
         ),
         "template": (
             "Summarize the following content clearly and concisely:\n\n"
@@ -23,7 +33,10 @@ PROMPTS: dict[str, dict[str, str]] = {
         "system": (
             "You are an expert at extracting the most important information from content. "
             "Identify the key ideas, insights, facts, and takeaways. "
-            "Be specific and actionable."
+            "Be specific and actionable.\n\n"
+            "For each key point, include a citation [1] referencing the source text. "
+            "Use blockquotes for notable direct quotes: > \"exact words\"\n"
+            "End with a References section listing each numbered citation's source text."
         ),
         "template": (
             "Extract the key points from the following content as a clear numbered list. "
@@ -70,7 +83,10 @@ PROMPTS: dict[str, dict[str, str]] = {
         "system": (
             "You are an expert at generating insightful questions and clear answers from content. "
             "Create a concise Q&A that captures the key ideas, facts, and concepts. "
-            "Questions should be natural and informative; answers should be direct and complete."
+            "Questions should be natural and informative; answers should be direct and complete.\n\n"
+            "Support answers with citations [1] and direct quotes where relevant. "
+            "Use blockquotes for direct quotes: > \"exact words\"\n"
+            "End with a References section listing the source text for each citation."
         ),
         "template": (
             "Generate a Q&A from the following content. "
@@ -95,7 +111,10 @@ PROMPTS: dict[str, dict[str, str]] = {
             "- [ ] [Task] — Owner: [Name if mentioned]\n\n"
             "### Next Steps\n"
             "- [Follow-up items, future meeting topics]\n\n"
-            "Be concise. Only include items explicitly discussed. Do not invent attendees or decisions."
+            "Be concise. Only include items explicitly discussed. Do not invent attendees or decisions.\n\n"
+            "Include citations [1] for decisions and commitments. "
+            "Use blockquotes for notable direct quotes: > \"exact words spoken\"\n"
+            "End with a References section with the exact source text for each citation."
         ),
         "template": (
             "Generate meeting minutes from the following transcript:\n\n"

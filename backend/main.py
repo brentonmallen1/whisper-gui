@@ -3,10 +3,12 @@ import base64
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -867,6 +869,12 @@ async def _extract_and_summarize_sse(extractor, source_arg, mode: str, model_ove
     _SOURCE_LIMIT = 32_000
     yield f"data: {json.dumps({'extracted_content': content[:_SOURCE_LIMIT]})}\n\n"
 
+    # Transcript mode: return raw extracted text without LLM processing
+    if mode == "transcript":
+        yield f"data: {json.dumps({'text': content})}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
     async for sse_line in _llm_summarize_sse(content, mode, model_override):
         yield sse_line
 
@@ -884,6 +892,7 @@ async def summarize_file(
     enhance_normalize: bool       = Form(False),
     enhance_denoise:   bool       = Form(False),
     enhance_isolate:   bool       = Form(False),
+    enhance_separate:  bool       = Form(False),
     enhance_upsample:  bool       = Form(False),
     _: bool = Depends(verify_auth),
 ):
@@ -907,6 +916,7 @@ async def summarize_file(
         normalize=enhance_normalize,
         denoise  =enhance_denoise,
         isolate  =enhance_isolate,
+        separate =enhance_separate,
         upsample =enhance_upsample,
     )
     pipeline = AudioPipeline() if opts.any_active else None
@@ -1106,9 +1116,10 @@ def _run_transcription(
             _jobs[job_id]["segments"] = segments
             _jobs[job_id]["language"] = language
     except Exception as exc:
+        traceback.print_exc()
         with _lock:
             _jobs[job_id]["status"] = "error"
-            _jobs[job_id]["error"]  = str(exc)
+            _jobs[job_id]["error"]  = str(exc) or repr(exc)
     finally:
         if enhanced != audio_path:
             enhanced.unlink(missing_ok=True)
@@ -1158,9 +1169,10 @@ def _run_enhancement(
             _jobs[job_id]["enhanced_path"] = str(enhanced_path)
 
     except Exception as exc:
+        traceback.print_exc()
         with _lock:
             _jobs[job_id]["status"] = "error"
-            _jobs[job_id]["error"]  = str(exc)
+            _jobs[job_id]["error"]  = str(exc) or repr(exc)
 
 
 def _sanitize_filename(filename: str) -> str:
@@ -1175,6 +1187,7 @@ async def transcribe(
     enhance_normalize: bool       = Form(False),
     enhance_denoise:   bool       = Form(False),
     enhance_isolate:   bool       = Form(False),
+    enhance_separate:  bool       = Form(False),
     enhance_upsample:  bool       = Form(False),
     _: bool = Depends(verify_auth),
 ):
@@ -1217,6 +1230,7 @@ async def transcribe(
         normalize=enhance_normalize,
         denoise  =enhance_denoise,
         isolate  =enhance_isolate,
+        separate =enhance_separate,
         upsample =enhance_upsample,
     )
 
@@ -1511,6 +1525,7 @@ class RetranscribeRequest(BaseModel):
     enhance_normalize: bool = False
     enhance_denoise:   bool = False
     enhance_isolate:   bool = False
+    enhance_separate:  bool = False
     enhance_upsample:  bool = False
 
 
@@ -1537,6 +1552,7 @@ async def retranscribe(
         normalize=req.enhance_normalize,
         denoise  =req.enhance_denoise,
         isolate  =req.enhance_isolate,
+        separate =req.enhance_separate,
         upsample =req.enhance_upsample,
     )
 
@@ -1564,6 +1580,7 @@ async def enhance_audio(
     enhance_normalize: bool       = Form(False),
     enhance_denoise:   bool       = Form(False),
     enhance_isolate:   bool       = Form(False),
+    enhance_separate:  bool       = Form(False),
     enhance_upsample:  bool       = Form(False),
     _: bool = Depends(verify_auth),
 ):
@@ -1605,6 +1622,7 @@ async def enhance_audio(
         normalize=enhance_normalize,
         denoise  =enhance_denoise,
         isolate  =enhance_isolate,
+        separate =enhance_separate,
         upsample =enhance_upsample,
     )
 
@@ -1666,6 +1684,7 @@ class ReenhanceRequest(BaseModel):
     enhance_normalize: bool = False
     enhance_denoise:   bool = False
     enhance_isolate:   bool = False
+    enhance_separate:  bool = False
     enhance_upsample:  bool = False
 
 
@@ -1690,6 +1709,7 @@ async def reenhance(
         normalize=req.enhance_normalize,
         denoise  =req.enhance_denoise,
         isolate  =req.enhance_isolate,
+        separate =req.enhance_separate,
         upsample =req.enhance_upsample,
     )
 
@@ -1718,6 +1738,401 @@ async def reenhance(
 
     background_tasks.add_task(_run_enhancement, new_job_id, audio_path, opts)
     return {"job_id": new_job_id}
+
+
+# ── Interactive Audio Pipeline ─────────────────────────────────────────────
+
+_PIPELINE_VALID_STEPS = {"normalize", "denoise", "isolate", "separate", "upsample"}
+
+_pipeline_sessions: dict[str, dict] = {}
+
+
+def _run_pipeline_step(session_id: str, step: str) -> None:
+    """Background task: apply a single enhancement step to the pipeline current audio."""
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        return
+
+    try:
+        current_file = Path(session["current_file"])
+        step_index   = len(session["steps"])
+        out_file     = AUDIO_CACHE / f"{session_id}_step{step_index}{current_file.suffix or '.wav'}"
+
+        AudioPipeline().run_single_step(current_file, step, out_file)
+
+        step_record = {
+            "step":        step,
+            "output_file": out_file.name,
+            "timestamp":   datetime.now(timezone.utc).isoformat(),
+        }
+
+        with _lock:
+            _pipeline_sessions[session_id]["steps"].append(step_record)
+            _pipeline_sessions[session_id]["current_file"]  = str(out_file)
+            _pipeline_sessions[session_id]["status"]        = "idle"
+            _pipeline_sessions[session_id]["status_detail"] = ""
+
+    except Exception as exc:
+        traceback.print_exc()
+        with _lock:
+            _pipeline_sessions[session_id]["status"] = "error"
+            _pipeline_sessions[session_id]["error"]  = str(exc) or repr(exc)
+
+
+@app.post("/api/pipeline")
+async def create_pipeline(
+    file: UploadFile = File(...),
+    _: bool = Depends(verify_auth),
+):
+    """Create a new interactive pipeline session by uploading an audio file."""
+    suffix = Path(file.filename or "audio").suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {suffix}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    contents = await file.read()
+    size_mb  = len(contents) / (1024 * 1024)
+    max_mb   = int(_settings.get("max_upload_size_mb", "500"))
+    if max_mb > 0 and size_mb > max_mb:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large: {size_mb:.1f} MB. Maximum: {max_mb} MB",
+        )
+
+    session_id = str(uuid.uuid4())
+    audio_path = AUDIO_CACHE / f"{session_id}_original{suffix}"
+    with open(audio_path, "wb") as f:
+        f.write(contents)
+
+    session = {
+        "session_id":    session_id,
+        "filename":      file.filename,
+        "original_file": audio_path.name,
+        "current_file":  str(audio_path),
+        "steps":         [],
+        "transcription": None,
+        "status":        "idle",
+        "status_detail": "",
+        "error":         None,
+    }
+    with _lock:
+        _pipeline_sessions[session_id] = session
+
+    return {"session_id": session_id, "filename": file.filename}
+
+
+@app.get("/api/pipeline/{session_id}")
+async def get_pipeline_session(session_id: str, _: bool = Depends(verify_auth)):
+    """Return the current state of a pipeline session."""
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+    return session
+
+
+class PipelineStepRequest(BaseModel):
+    step: str  # "normalize" | "denoise" | "isolate" | "upsample"
+
+
+@app.post("/api/pipeline/{session_id}/step")
+async def apply_pipeline_step(
+    session_id: str,
+    req: PipelineStepRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_auth),
+):
+    """Apply a single named enhancement step to the pipeline's current audio."""
+    if req.step not in _PIPELINE_VALID_STEPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid step: {req.step!r}. Must be one of: {', '.join(sorted(_PIPELINE_VALID_STEPS))}",
+        )
+
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+    if session["status"] == "processing":
+        raise HTTPException(status_code=409, detail="A step is already in progress")
+
+    with _lock:
+        _pipeline_sessions[session_id]["status"]        = "processing"
+        _pipeline_sessions[session_id]["status_detail"] = f"Applying {req.step}…"
+        _pipeline_sessions[session_id]["error"]         = None
+
+    background_tasks.add_task(_run_pipeline_step, session_id, req.step)
+    return {"status": "processing", "step": req.step}
+
+
+@app.get("/api/pipeline/{session_id}/audio")
+async def get_pipeline_audio(
+    session_id: str,
+    step: str = Query(default="current"),
+    _: bool = Depends(verify_auth),
+):
+    """
+    Serve audio for a pipeline session.
+    ?step=current (default) — latest processed audio
+    ?step=original          — the original uploaded file
+    ?step=0, 1, 2, ...     — output of step N
+    """
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+
+    if step == "original":
+        audio_path = AUDIO_CACHE / session["original_file"]
+    elif step == "current":
+        audio_path = Path(session["current_file"])
+    else:
+        try:
+            idx   = int(step)
+            steps = session["steps"]
+            if idx < 0 or idx >= len(steps):
+                raise HTTPException(status_code=404, detail=f"Step {idx} not found")
+            audio_path = AUDIO_CACHE / steps[idx]["output_file"]
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid step parameter: {step!r}")
+
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    return FileResponse(audio_path, media_type="audio/mpeg")
+
+
+@app.delete("/api/pipeline/{session_id}/step")
+async def undo_pipeline_step(session_id: str, _: bool = Depends(verify_auth)):
+    """Remove the last enhancement step and revert to the previous audio state."""
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+    if session["status"] == "processing":
+        raise HTTPException(status_code=409, detail="Cannot undo while a step is in progress")
+    if not session["steps"]:
+        raise HTTPException(status_code=400, detail="No steps to undo")
+
+    with _lock:
+        steps   = _pipeline_sessions[session_id]["steps"]
+        removed = steps.pop()
+        (AUDIO_CACHE / removed["output_file"]).unlink(missing_ok=True)
+        if steps:
+            _pipeline_sessions[session_id]["current_file"] = str(AUDIO_CACHE / steps[-1]["output_file"])
+        else:
+            _pipeline_sessions[session_id]["current_file"] = str(AUDIO_CACHE / session["original_file"])
+        _pipeline_sessions[session_id]["error"] = None
+        steps_remaining = len(steps)
+
+    return {"status": "ok", "steps_remaining": steps_remaining}
+
+
+@app.post("/api/pipeline/{session_id}/transcribe")
+async def transcribe_pipeline_audio(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_auth),
+):
+    """Transcribe the pipeline's current audio using the configured Whisper engine."""
+    if _engine_status != "ready":
+        raise HTTPException(status_code=503, detail="Engine is still loading — please wait.")
+
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+    if session["status"] == "processing":
+        raise HTTPException(status_code=409, detail="A step is still in progress")
+
+    current_file = Path(session["current_file"])
+    if not current_file.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    job_id     = str(uuid.uuid4())
+    audio_path = AUDIO_CACHE / f"{job_id}{current_file.suffix}"
+    shutil.copy2(current_file, audio_path)
+
+    sidecar = AUDIO_CACHE / f"{job_id}.json"
+    sidecar.write_text(json.dumps({
+        "job_id":           job_id,
+        "filename":         session.get("filename"),
+        "audio_file":       audio_path.name,
+        "size":             audio_path.stat().st_size,
+        "uploaded_at":      datetime.now(timezone.utc).isoformat(),
+        "pipeline_session": session_id,
+    }))
+
+    with _lock:
+        _jobs[job_id] = {
+            "status":        "pending",
+            "status_detail": "",
+            "result":        None,
+            "segments":      [],
+            "language":      None,
+            "error":         None,
+            "filename":      session.get("filename"),
+            "audio_path":    str(audio_path),
+        }
+
+    background_tasks.add_task(_run_transcription, job_id, audio_path, EnhancementOptions())
+
+    with _lock:
+        _pipeline_sessions[session_id]["transcription"] = job_id
+
+    return {"job_id": job_id}
+
+
+@app.delete("/api/pipeline/{session_id}")
+async def delete_pipeline_session(session_id: str, _: bool = Depends(verify_auth)):
+    """Delete a pipeline session and clean up all its audio files."""
+    with _lock:
+        session = _pipeline_sessions.pop(session_id, None)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+
+    # Delete original and all step output files
+    for name in [session["original_file"]] + [s["output_file"] for s in session.get("steps", [])]:
+        (AUDIO_CACHE / name).unlink(missing_ok=True)
+
+    return {"status": "ok"}
+
+
+@app.get("/api/pipeline/{session_id}/download")
+async def download_pipeline_audio(session_id: str, _: bool = Depends(verify_auth)):
+    """Download the current (latest) processed audio from a pipeline session."""
+    with _lock:
+        session = _pipeline_sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Pipeline session not found")
+
+    audio_path = Path(session["current_file"])
+    if not audio_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found")
+
+    stem   = _sanitize_filename(Path(session.get("filename") or "audio").stem)
+    suffix = audio_path.suffix
+    steps  = session.get("steps", [])
+    label  = f"_pipeline_{len(steps)}steps" if steps else "_original"
+    return FileResponse(
+        audio_path,
+        media_type="application/octet-stream",
+        filename=f"{stem}{label}{suffix}",
+    )
+
+
+# ── YouTube Download Tool ──────────────────────────────────────────────────
+
+_yt_download_jobs: dict[str, dict] = {}
+
+
+class YouTubeDownloadRequest(BaseModel):
+    url:           str
+    mode:          str = "audio"   # "video" | "audio"
+    video_quality: str = "best"    # "best" | "2160" | "1080" | "720" | "480" | "360"
+    video_format:  str = "mp4"     # "mp4" | "webm" | "mkv"
+    audio_format:  str = "mp3"     # "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus"
+    audio_quality: str = "192"     # "128" | "192" | "256" | "320" | "best"
+
+
+def _run_yt_download(job_id: str, req: YouTubeDownloadRequest) -> None:
+    """Background task: download a YouTube video or audio file."""
+    from extractors.youtube import download_video, download_audio, _VALID_VIDEO_FORMATS, _VALID_AUDIO_FORMATS, _VALID_VIDEO_QUALITIES
+
+    def _status(detail: str) -> None:
+        with _lock:
+            _yt_download_jobs[job_id]["status_detail"] = detail
+
+    tmpdir = Path(tempfile.mkdtemp())
+    try:
+        if req.mode == "video":
+            fmt = req.video_format if req.video_format in _VALID_VIDEO_FORMATS else "mp4"
+            quality = req.video_quality if req.video_quality in _VALID_VIDEO_QUALITIES else "best"
+            _status(f"Downloading {quality}p {fmt.upper()} video…")
+            output_path = download_video(req.url, tmpdir, quality=quality, fmt=fmt)
+        else:
+            fmt = req.audio_format if req.audio_format in _VALID_AUDIO_FORMATS else "mp3"
+            _status(f"Downloading {fmt.upper()} audio…")
+            output_path = download_audio(req.url, tmpdir, fmt=fmt, quality=req.audio_quality)
+
+        # Move to stable cache location
+        dest = AUDIO_CACHE / f"{job_id}_{output_path.name}"
+        shutil.move(str(output_path), dest)
+
+        with _lock:
+            _yt_download_jobs[job_id]["status"]       = "done"
+            _yt_download_jobs[job_id]["status_detail"] = ""
+            _yt_download_jobs[job_id]["output_file"]   = str(dest)
+            _yt_download_jobs[job_id]["filename"]      = output_path.name
+
+    except Exception as exc:
+        with _lock:
+            _yt_download_jobs[job_id]["status"] = "error"
+            _yt_download_jobs[job_id]["error"]  = str(exc)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@app.get("/api/youtube/info")
+async def youtube_info(url: str = Query(...), _: bool = Depends(verify_auth)):
+    """Fetch YouTube video metadata without downloading."""
+    from extractors.youtube import get_video_info
+    try:
+        info = await asyncio.to_thread(get_video_info, url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return info
+
+
+@app.post("/api/youtube/download")
+async def youtube_download(
+    req: YouTubeDownloadRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_auth),
+):
+    """Start a YouTube download job."""
+    job_id = str(uuid.uuid4())
+    with _lock:
+        _yt_download_jobs[job_id] = {
+            "status":        "pending",
+            "status_detail": "",
+            "output_file":   None,
+            "filename":      None,
+            "error":         None,
+        }
+    background_tasks.add_task(_run_yt_download, job_id, req)
+    return {"job_id": job_id}
+
+
+@app.get("/api/youtube/{job_id}")
+async def youtube_job_status(job_id: str, _: bool = Depends(verify_auth)):
+    """Poll the status of a YouTube download job."""
+    with _lock:
+        job = _yt_download_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    return job
+
+
+@app.get("/api/youtube/{job_id}/file")
+async def youtube_download_file(job_id: str, _: bool = Depends(verify_auth)):
+    """Download the completed file from a YouTube download job."""
+    with _lock:
+        job = _yt_download_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Download job not found")
+    if job["status"] != "done":
+        raise HTTPException(status_code=400, detail="Download not complete")
+
+    output_path = Path(job["output_file"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    filename = _sanitize_filename(job.get("filename") or output_path.name)
+    return FileResponse(output_path, media_type="application/octet-stream", filename=filename)
 
 
 # ── SPA catch-all — must be the last route registered ─────────────────────

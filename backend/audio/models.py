@@ -34,27 +34,22 @@ def get_model_status() -> dict[str, dict[str, bool]]:
     """
     Return package and weight availability for each enhancement model.
 
-    Shape: { "deepfilternet": {"package": bool, "weights": bool}, ... }
+    Shape: { "clearvoice": {"package": bool, "weights": bool}, ... }
     """
-    df_pkg      = _pkg("df")
-    demucs_pkg  = _pkg("demucs")
-    # LavaSR package is the 'LavaSR' namespace (capital)
-    lavasr_pkg  = _pkg("LavaSR")
+    demucs_pkg     = _pkg("demucs")
+    clearvoice_pkg = _pkg("clearvoice")
 
     return {
-        "deepfilternet": {
-            "package": df_pkg,
-            "weights": _hf_model_cached("DeepFilterNet/DeepFilterNet3") if df_pkg else False,
-        },
         "demucs": {
             "package": demucs_pkg,
             # Demucs 4.x uses HF Hub; htdemucs lives under facebook/demucs
             "weights": _hf_model_cached("facebook/demucs") if demucs_pkg else False,
         },
-        "lavasr": {
-            "package": lavasr_pkg,
-            # LavaSR downloads from YatharthS/LavaSR on HF Hub
-            "weights": _hf_model_cached("YatharthS/LavaSR") if lavasr_pkg else False,
+        "clearvoice": {
+            "package": clearvoice_pkg,
+            # ClearVoice downloads models from ModelScope/HF on first use;
+            # treat as available if the package itself is installed.
+            "weights": clearvoice_pkg,
         },
     }
 
@@ -64,26 +59,20 @@ def download_model(name: str) -> None:
     Trigger weight download for the named model. Blocks until complete.
     Relies on model packages downloading to HF_HOME on first use.
     """
-    if name == "deepfilternet":
-        if not _pkg("df"):
-            raise RuntimeError("deepfilternet package not installed.")
-        from df.enhance import init_df
-        init_df()  # downloads DeepFilterNet3 weights on first call
-
-    elif name == "demucs":
+    if name == "demucs":
         if not _pkg("demucs"):
             raise RuntimeError("demucs package not installed.")
         from demucs.pretrained import get_model
         get_model("htdemucs")  # downloads htdemucs weights if not cached
 
-    elif name == "lavasr":
-        if not _pkg("LavaSR"):
-            raise RuntimeError(
-                "LavaSR package not installed. "
-                "Install with: uv add 'lavasr @ git+https://github.com/ysharma3501/LavaSR.git'"
-            )
-        from LavaSR.model import LavaEnhance
-        LavaEnhance()  # triggers snapshot_download("YatharthS/LavaSR")
+    elif name == "clearvoice":
+        if not _pkg("clearvoice"):
+            raise RuntimeError("clearvoice package not installed.")
+        from clearvoice import ClearVoice
+        # Instantiating each model triggers weight download
+        ClearVoice(task='speech_enhancement',     model_names=['MossFormer2_SE_48K'])
+        ClearVoice(task='speech_separation',      model_names=['MossFormer2_SS_16K'])
+        ClearVoice(task='speech_super_resolution', model_names=['MossFormer2_SR_48K'])
 
     else:
         raise ValueError(f"Unknown model: {name!r}")

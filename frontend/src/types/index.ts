@@ -143,6 +143,39 @@ export interface Feed {
   created_at:     string;
 }
 
+export interface YouTubeVideoInfo {
+  title:            string;
+  duration_seconds: number | null;
+  thumbnail:        string | null;
+  uploader:         string;
+}
+
+export interface YouTubeDownloadJob {
+  status:        'pending' | 'done' | 'error';
+  status_detail: string;
+  output_file:   string | null;
+  filename:      string | null;
+  error:         string | null;
+}
+
+export interface PipelineStep {
+  step:        string;
+  output_file: string;
+  timestamp:   string;
+}
+
+export interface PipelineSession {
+  session_id:    string;
+  filename:      string | null;
+  original_file: string;
+  current_file:  string;
+  steps:         PipelineStep[];
+  transcription: string | null;
+  status:        'idle' | 'processing' | 'error';
+  status_detail: string;
+  error:         string | null;
+}
+
 export interface FeedEntry {
   id:         string;
   feed_id:    string;

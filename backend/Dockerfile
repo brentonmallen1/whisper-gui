@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     build-essential \
+    cargo \
     && rm -rf /var/lib/apt/lists/*
 
 # Static ffmpeg binary — avoids pulling in GTK, GL, and dozens of codec libs

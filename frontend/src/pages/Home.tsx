@@ -9,6 +9,8 @@ import {
   BookOpen,
   Layers,
   Rss,
+  GitBranch,
+  Download,
 } from 'lucide-react';
 import ToolCard from '../components/ToolCard';
 import './Home.css';
@@ -69,6 +71,18 @@ export default function Home() {
               title="Audio Enhance"
               description="Improve audio quality — noise reduction, vocal isolation, super-resolution."
               href="/enhance"
+            />
+            <ToolCard
+              icon={GitBranch}
+              title="Audio Pipeline"
+              description="Build a step-by-step enhancement chain, preview after each stage, then transcribe."
+              href="/pipeline"
+            />
+            <ToolCard
+              icon={Download}
+              title="YouTube Download"
+              description="Download YouTube videos or audio in your preferred format, codec, and quality."
+              href="/download"
             />
             <ToolCard
               icon={Clock}

@@ -1,4 +1,4 @@
-import type { AppInfo, AudioModelMap, Capabilities, ChatMessage, EnhancementOptions, Feed, FeedEntry, FileMeta, HistoryEntry, Job, OllamaModel, Prompt, Settings, SettingsUpdateResponse } from '../types';
+import type { AppInfo, AudioModelMap, Capabilities, ChatMessage, EnhancementOptions, Feed, FeedEntry, FileMeta, HistoryEntry, Job, OllamaModel, PipelineSession, Prompt, Settings, SettingsUpdateResponse, YouTubeDownloadJob, YouTubeVideoInfo } from '../types';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
@@ -312,6 +312,75 @@ export function deleteHistoryEntry(id: string): Promise<void> {
 
 export function clearHistory(): Promise<void> {
   return request('/api/history', { method: 'DELETE' });
+}
+
+// ── YouTube Download ───────────────────────────────────────────────────────
+
+export function getYouTubeInfo(url: string): Promise<YouTubeVideoInfo> {
+  return request<YouTubeVideoInfo>(`/api/youtube/info?url=${encodeURIComponent(url)}`);
+}
+
+export function startYouTubeDownload(opts: {
+  url:           string;
+  mode:          'video' | 'audio';
+  video_quality?: string;
+  video_format?:  string;
+  audio_format?:  string;
+  audio_quality?: string;
+}): Promise<{ job_id: string }> {
+  return request('/api/youtube/download', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  });
+}
+
+export function getYouTubeJobStatus(jobId: string): Promise<YouTubeDownloadJob> {
+  return request<YouTubeDownloadJob>(`/api/youtube/${jobId}`);
+}
+
+export function getYouTubeFileUrl(jobId: string): string {
+  return `/api/youtube/${jobId}/file`;
+}
+
+// ── Interactive Audio Pipeline ─────────────────────────────────────────────
+
+export function createPipeline(file: File): Promise<{ session_id: string; filename: string | null }> {
+  const form = new FormData();
+  form.append('file', file);
+  return request('/api/pipeline', { method: 'POST', body: form });
+}
+
+export function getPipelineSession(sessionId: string): Promise<PipelineSession> {
+  return request<PipelineSession>(`/api/pipeline/${sessionId}`);
+}
+
+export function applyPipelineStep(sessionId: string, step: string): Promise<{ status: string; step: string }> {
+  return request(`/api/pipeline/${sessionId}/step`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ step }),
+  });
+}
+
+export function undoPipelineStep(sessionId: string): Promise<{ status: string; steps_remaining: number }> {
+  return request(`/api/pipeline/${sessionId}/step`, { method: 'DELETE' });
+}
+
+export function transcribePipeline(sessionId: string): Promise<{ job_id: string }> {
+  return request(`/api/pipeline/${sessionId}/transcribe`, { method: 'POST' });
+}
+
+export function getPipelineAudioUrl(sessionId: string, step: string = 'current'): string {
+  return `/api/pipeline/${sessionId}/audio?step=${encodeURIComponent(step)}`;
+}
+
+export function getPipelineDownloadUrl(sessionId: string): string {
+  return `/api/pipeline/${sessionId}/download`;
+}
+
+export function deletePipeline(sessionId: string): Promise<{ status: string }> {
+  return request(`/api/pipeline/${sessionId}`, { method: 'DELETE' });
 }
 
 // ── Audio models ───────────────────────────────────────────────────────────

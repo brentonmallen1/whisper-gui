@@ -31,6 +31,8 @@ const SOURCE_TABS: { id: SourceTab; label: string; icon: React.ElementType }[] =
   { id: 'image',   label: 'Image',   icon: ImageIcon  },
 ];
 
+const TRANSCRIPT_MODE = { id: 'transcript', label: 'Transcript', hint: 'Raw transcription — no AI processing' };
+
 // Static fallback modes (used before prompts load from API)
 const DEFAULT_modes: { id: string; label: string; hint: string }[] = [
   { id: 'summary',         label: 'Summary',         hint: 'Concise prose overview' },
@@ -39,6 +41,7 @@ const DEFAULT_modes: { id: string; label: string; hint: string }[] = [
   { id: 'action_items',    label: 'Action Items',    hint: 'Concrete tasks and next steps' },
   { id: 'q_and_a',         label: 'Q&A',             hint: 'Questions and answers' },
   { id: 'meeting_minutes', label: 'Meeting Minutes', hint: 'Structured notes from a meeting' },
+  TRANSCRIPT_MODE,
 ];
 
 // Audio/video extensions the Audio tab accepts
@@ -205,7 +208,7 @@ export default function Summarize() {
       for (const p of sorted) {
         seen.set(p.mode, { id: p.mode, label: p.name, hint: '' });
       }
-      if (seen.size > 0) setModes([...seen.values()]);
+      if (seen.size > 0) setModes([...seen.values(), TRANSCRIPT_MODE]);
     }).catch(() => {});
   }, []);
 
@@ -735,7 +738,7 @@ export default function Summarize() {
             disabled={!canSubmit}
           >
             <Sparkles size={15} aria-hidden="true" />
-            {isRunning ? 'Processing…' : modeCache[mode] ? 'Re-run' : 'Summarize'}
+            {isRunning ? 'Processing…' : modeCache[mode] ? 'Re-run' : mode === 'transcript' ? 'Transcribe' : 'Summarize'}
           </button>
         </div>
 

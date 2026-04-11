@@ -3,12 +3,12 @@ Audio enhancement pipeline.
 
 Stages (in order):
   normalize  — ffmpeg loudnorm, always fast
-  denoise    — DeepFilterNet noise reduction
-  isolate    — Demucs vocal isolation
-  upsample   — LavaSR super-resolution (outputs 48kHz)
+  denoise    — ClearVoice speech enhancement (MossFormer2_SE_48K)
+  isolate    — Demucs vocal isolation (separates vocals from instruments)
+  separate   — ClearVoice speech separation (MossFormer2_SS_16K)
+  upsample   — ClearVoice super-resolution to 48kHz (MossFormer2_SR_48K)
 
-Each stage is independent and optional. When DeepFilterNet runs before
-LavaSR, the upsample stage sets denoise=False to avoid double denoising.
+Each stage is independent and optional.
 
 Two interfaces are provided:
   run()       — async, for use from the SSE extractor pipeline
@@ -16,6 +16,7 @@ Two interfaces are provided:
 """
 
 import asyncio
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -26,13 +27,14 @@ from typing import Callable
 @dataclass
 class EnhancementOptions:
     normalize: bool = False
-    denoise:   bool = False   # DeepFilterNet
-    isolate:   bool = False   # Demucs
-    upsample:  bool = False   # LavaSR
+    denoise:   bool = False   # ClearVoice speech enhancement
+    isolate:   bool = False   # Demucs vocal isolation
+    separate:  bool = False   # ClearVoice speaker separation
+    upsample:  bool = False   # ClearVoice super-resolution
 
     @property
     def any_active(self) -> bool:
-        return self.normalize or self.denoise or self.isolate or self.upsample
+        return self.normalize or self.denoise or self.isolate or self.separate or self.upsample
 
     @classmethod
     def from_dict(cls, d: dict) -> "EnhancementOptions":
@@ -44,6 +46,7 @@ class EnhancementOptions:
             normalize=_b(d.get("enhance_normalize", False)),
             denoise  =_b(d.get("enhance_denoise",   False)),
             isolate  =_b(d.get("enhance_isolate",   False)),
+            separate =_b(d.get("enhance_separate",  False)),
             upsample =_b(d.get("enhance_upsample",  False)),
         )
 
@@ -69,11 +72,6 @@ class AudioPipeline:
         if not options.any_active:
             return input_path
 
-        def _sync_status(phase: str, detail: str) -> None:
-            # Wrap async on_status as fire-and-forget for the sync runner
-            pass  # status updates come from the async layer below
-
-        # We'll run each stage in a thread and call on_status between them
         tmp_files: list[Path] = []
         current = input_path
 
@@ -90,7 +88,7 @@ class AudioPipeline:
                 current = out
 
             if options.denoise:
-                await on_status("extracting", "Reducing noise (DeepFilterNet)…")
+                await on_status("extracting", "Enhancing speech (ClearVoice)…")
                 out = mk_tmp()
                 await asyncio.to_thread(self._denoise, current, out)
                 current = out
@@ -101,10 +99,16 @@ class AudioPipeline:
                 await asyncio.to_thread(self._isolate, current, out)
                 current = out
 
-            if options.upsample:
-                await on_status("extracting", "Upsampling audio (LavaSR)…")
+            if options.separate:
+                await on_status("extracting", "Separating speakers (ClearVoice)…")
                 out = mk_tmp()
-                await asyncio.to_thread(self._upsample, current, out, options.denoise)
+                await asyncio.to_thread(self._separate, current, out)
+                current = out
+
+            if options.upsample:
+                await on_status("extracting", "Upsampling to 48kHz (ClearVoice)…")
+                out = mk_tmp()
+                await asyncio.to_thread(self._upsample, current, out)
                 current = out
 
             # Clean up intermediates; keep the final output for the caller
@@ -155,7 +159,7 @@ class AudioPipeline:
                 current = out
 
             if options.denoise:
-                status("enhancing", "Reducing noise (DeepFilterNet)…")
+                status("enhancing", "Enhancing speech (ClearVoice)…")
                 out = mk_tmp()
                 self._denoise(current, out)
                 current = out
@@ -166,10 +170,16 @@ class AudioPipeline:
                 self._isolate(current, out)
                 current = out
 
-            if options.upsample:
-                status("enhancing", "Upsampling audio (LavaSR)…")
+            if options.separate:
+                status("enhancing", "Separating speakers (ClearVoice)…")
                 out = mk_tmp()
-                self._upsample(current, out, options.denoise)
+                self._separate(current, out)
+                current = out
+
+            if options.upsample:
+                status("enhancing", "Upsampling to 48kHz (ClearVoice)…")
+                out = mk_tmp()
+                self._upsample(current, out)
                 current = out
 
             for p in tmp_files:
@@ -198,20 +208,19 @@ class AudioPipeline:
         )
 
     def _denoise(self, inp: Path, out: Path) -> None:
-        """Noise reduction via DeepFilterNet."""
-        import torch
-        from df.enhance import enhance, init_df, load_audio, save_audio
+        """Speech enhancement via ClearVoice (MossFormer2_SE_48K)."""
+        try:
+            from clearvoice import ClearVoice
+        except ImportError:
+            raise RuntimeError("clearvoice package not installed. Install with: uv add clearvoice")
 
-        model, df_state, _ = init_df()
-        if torch.cuda.is_available():
-            model = model.cuda()
-
-        audio, _ = load_audio(str(inp), sr=df_state.sr())
-        enhanced = enhance(model, df_state, audio)
-        save_audio(str(out), enhanced, df_state.sr())
+        cv = ClearVoice(task='speech_enhancement', model_names=['MossFormer2_SE_48K'])
+        output_wav = cv(input_path=str(inp), online_write=False)
+        cv.write(output_wav, output_path=str(out))
 
     def _isolate(self, inp: Path, out: Path) -> None:
         """Vocal isolation via Demucs (htdemucs model)."""
+        import soundfile as sf
         import torch
         import torchaudio
         from demucs.pretrained import get_model
@@ -222,7 +231,8 @@ class AudioPipeline:
         model.to(device)
         model.eval()
 
-        wav, sr = torchaudio.load(str(inp))
+        data, sr = sf.read(str(inp), always_2d=True)  # (samples, channels)
+        wav = torch.from_numpy(data.T).float()         # (channels, samples)
 
         # Demucs requires stereo input
         if wav.shape[0] == 1:
@@ -238,39 +248,50 @@ class AudioPipeline:
             sources = apply_model(model, wav)[0]
 
         vocals_idx = model.sources.index("vocals")
-        vocals = sources[vocals_idx].cpu()
-        # Back to mono
-        torchaudio.save(str(out), vocals.mean(0, keepdim=True), model.samplerate)
+        vocals = sources[vocals_idx].cpu().mean(0)  # mono (samples,)
+        sf.write(str(out), vocals.numpy(), model.samplerate)
 
-    def _upsample(self, inp: Path, out: Path, denoise_already_done: bool) -> None:
-        """
-        Audio super-resolution via LavaSR (outputs 48kHz).
-        LavaSR expects 16kHz mono input; we resample before passing in.
-        Pass denoise_already_done=True when DeepFilterNet has already run
-        to skip the built-in denoiser and avoid double denoising.
-        """
-        import torch
-        import torchaudio
-
+    def _separate(self, inp: Path, out: Path) -> None:
+        """Separate overlapping speakers via ClearVoice (MossFormer2_SS_16K).
+        Outputs the first (dominant) separated speaker."""
         try:
-            from LavaSR.model import LavaEnhance
+            from clearvoice import ClearVoice
         except ImportError:
-            raise RuntimeError(
-                "LavaSR is not installed. "
-                "Install with: uv add 'lavasr @ git+https://github.com/ysharma3501/LavaSR.git'"
-            )
+            raise RuntimeError("clearvoice package not installed. Install with: uv add clearvoice")
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = LavaEnhance(device=device)
+        cv = ClearVoice(task='speech_separation', model_names=['MossFormer2_SS_16K'])
 
-        wav, sr = torchaudio.load(str(inp))
-        # LavaEnhance expects 16kHz mono 1-D tensor
-        if wav.shape[0] > 1:
-            wav = wav.mean(0, keepdim=True)
-        if sr != 16_000:
-            wav = torchaudio.functional.resample(wav, sr, 16_000)
-        wav = wav.squeeze(0).to(device)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cv(input_path=str(inp), online_write=True, output_path=tmpdir)
+            # ClearVoice writes {stem}_MossFormer2_SS_16K_spk1.wav, spk2.wav, ...
+            spk1 = Path(tmpdir) / f"{inp.stem}_MossFormer2_SS_16K_spk1.wav"
+            if spk1.exists():
+                shutil.copy(spk1, out)
+            else:
+                # Fallback: find any spk1 file in case stem differs
+                candidates = list(Path(tmpdir).glob("*_spk1.wav"))
+                if candidates:
+                    shutil.copy(candidates[0], out)
+                else:
+                    shutil.copy(inp, out)
 
-        enhanced = model.enhance(wav, enhance=True, denoise=not denoise_already_done)
-        # enhance() returns a 1-D tensor at 48kHz
-        torchaudio.save(str(out), enhanced.unsqueeze(0).cpu(), 48_000)
+    def _upsample(self, inp: Path, out: Path) -> None:
+        """Audio super-resolution to 48kHz via ClearVoice (MossFormer2_SR_48K)."""
+        try:
+            from clearvoice import ClearVoice
+        except ImportError:
+            raise RuntimeError("clearvoice package not installed. Install with: uv add clearvoice")
+
+        cv = ClearVoice(task='speech_super_resolution', model_names=['MossFormer2_SR_48K'])
+        output_wav = cv(input_path=str(inp), online_write=False)
+        cv.write(output_wav, output_path=str(out))
+
+    def run_single_step(self, input_path: Path, step: str, output_path: Path) -> None:
+        """Run a single named enhancement step."""
+        match step:
+            case "normalize": self._normalize(input_path, output_path)
+            case "denoise":   self._denoise(input_path, output_path)
+            case "isolate":   self._isolate(input_path, output_path)
+            case "separate":  self._separate(input_path, output_path)
+            case "upsample":  self._upsample(input_path, output_path)
+            case _:           raise ValueError(f"Unknown step: {step!r}")

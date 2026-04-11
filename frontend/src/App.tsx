@@ -9,6 +9,8 @@ import Prompts from './pages/Prompts';
 import History from './pages/History';
 import Batch from './pages/Batch';
 import Feeds from './pages/Feeds';
+import Pipeline from './pages/Pipeline';
+import Download from './pages/Download';
 import { SourceCacheProvider } from './context/SourceCache';
 
 export default function App() {
@@ -26,6 +28,8 @@ export default function App() {
             <Route path="/history" element={<History />} />
             <Route path="/batch" element={<Batch />} />
             <Route path="/feeds" element={<Feeds />} />
+            <Route path="/pipeline" element={<Pipeline />} />
+            <Route path="/download" element={<Download />} />
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

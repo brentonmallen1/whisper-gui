@@ -89,7 +89,7 @@
   text-align: center;
 }
 
-.enhance-dropzone:not(.disabled):hover,
+.enhance-dropzone:hover,
 .enhance-dropzone.dragging {
   border-color: var(--accent);
   background: var(--accent-subtle);
@@ -100,11 +100,6 @@
   outline: none;
   box-shadow: var(--focus-ring);
   border-color: var(--accent);
-}
-
-.enhance-dropzone.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
 }
 
 .enhance-dropzone-icon {
@@ -134,6 +129,40 @@
   color: var(--text-muted);
   margin-top: 4px;
   letter-spacing: 0.02em;
+}
+
+/* ── Configure view ──────────────────────────────────────────────────── */
+.enhance-configure {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: var(--shadow);
+}
+
+.enhance-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.enhance-filename {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+  flex: 1;
+}
+
+.enhance-start-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 4px;
 }
 
 /* ── Progress ─────────────────────────────────────────────────────────── */

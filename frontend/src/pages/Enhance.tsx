@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowLeft, Upload, Download, RotateCcw, AudioWaveform, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Upload, Download, RotateCcw, AudioWaveform, AlertTriangle, Play } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as api from '../api/client';
 import type { AudioModelMap, EnhancementOptions } from '../types';
@@ -13,7 +13,7 @@ const ACCEPTED_EXTENSIONS = [
 const ACCEPTED_MIME = ACCEPTED_EXTENSIONS.join(',');
 const POLL_INTERVAL_MS = 1200;
 
-type View = 'upload' | 'progress' | 'result' | 'error';
+type View = 'upload' | 'configure' | 'progress' | 'result' | 'error';
 
 export default function Enhance() {
   const [view, setView]                     = useState<View>('upload');
@@ -24,6 +24,7 @@ export default function Enhance() {
   const [enhancement, setEnhancement]       = useState<EnhancementOptions>(DEFAULT_ENHANCEMENT);
   const [audioModels, setAudioModels]       = useState<AudioModelMap | undefined>(undefined);
   const [activePlayer, setActivePlayer]     = useState<'original' | 'enhanced'>('enhanced');
+  const [pendingFile, setPendingFile]       = useState<File | null>(null);
 
   const jobIdRef         = useRef<string | null>(null);
   const pollRef          = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -74,15 +75,15 @@ export default function Enhance() {
       setView('error');
       return;
     }
+    setPendingFile(file);
+    setFilename(file.name);
+    setView('configure');
+  }, []);
 
-    const anyActive = Object.values(enhancement).some(Boolean);
-    if (!anyActive) {
-      setErrorMsg('Select at least one enhancement stage before uploading.');
-      return;
-    }
-
-    uploadFile(file);
-  }, [enhancement]); // eslint-disable-line react-hooks/exhaustive-deps
+  const startEnhancement = () => {
+    if (!pendingFile || !Object.values(enhancement).some(Boolean)) return;
+    uploadFile(pendingFile);
+  };
 
   const uploadFile = async (file: File) => {
     setFilename(file.name);
@@ -128,6 +129,7 @@ export default function Enhance() {
   const reset = () => {
     stopPolling();
     jobIdRef.current = null;
+    setPendingFile(null);
     setView('upload');
     setErrorMsg('');
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -184,6 +186,7 @@ export default function Enhance() {
 
   const anyActive = Object.values(enhancement).some(Boolean);
 
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
@@ -201,13 +204,54 @@ export default function Enhance() {
           </div>
           <div>
             <h1 className="enhance-title">Audio Enhance</h1>
-            <p className="enhance-subtitle">Improve audio quality — noise reduction, vocal isolation, super-resolution</p>
+            <p className="enhance-subtitle">Upload audio, choose enhancements, then run</p>
           </div>
         </div>
 
         {/* Upload view */}
         {view === 'upload' && (
-          <>
+          <div
+            className={`enhance-dropzone${isDragging ? ' dragging' : ''}`}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            onClick={() => fileInputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            aria-label="Drop audio or video file, or click to browse"
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_MIME}
+              aria-hidden="true"
+              hidden
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file) handleFile(file);
+              }}
+            />
+            <Upload size={32} className="enhance-dropzone-icon" aria-hidden="true" />
+            <p className="enhance-dropzone-title">Drag &amp; drop audio or video here</p>
+            <p className="enhance-dropzone-sub">or click to browse</p>
+            <p className="enhance-dropzone-formats">
+              MP3 · WAV · M4A · FLAC · OGG · WEBM · OPUS · AAC · MP4 · MKV · MOV
+            </p>
+          </div>
+        )}
+
+        {/* Configure view */}
+        {view === 'configure' && (
+          <div className="enhance-configure">
+            <div className="enhance-file-row">
+              <span className="enhance-filename">{filename}</span>
+              <button className="enhance-btn enhance-btn--ghost" onClick={reset}>
+                <RotateCcw size={13} aria-hidden="true" />
+                Change file
+              </button>
+            </div>
+
             <EnhancementPanel
               value={enhancement}
               onChange={setEnhancement}
@@ -217,41 +261,21 @@ export default function Enhance() {
             {!anyActive && (
               <div className="enhance-warn" role="alert">
                 <AlertTriangle size={15} aria-hidden="true" />
-                Select at least one enhancement stage above before uploading.
+                Select at least one enhancement stage above.
               </div>
             )}
 
-            <div
-              className={`enhance-dropzone${isDragging ? ' dragging' : ''}${!anyActive ? ' disabled' : ''}`}
-              onDragOver={anyActive ? onDragOver : undefined}
-              onDragLeave={onDragLeave}
-              onDrop={anyActive ? onDrop : undefined}
-              onClick={() => { if (anyActive) fileInputRef.current?.click(); }}
-              role="button"
-              tabIndex={anyActive ? 0 : -1}
-              aria-label="Drop audio or video file, or click to browse"
-              aria-disabled={!anyActive}
-              onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && anyActive) fileInputRef.current?.click(); }}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept={ACCEPTED_MIME}
-                aria-hidden="true"
-                hidden
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) handleFile(file);
-                }}
-              />
-              <Upload size={32} className="enhance-dropzone-icon" aria-hidden="true" />
-              <p className="enhance-dropzone-title">Drag &amp; drop audio or video here</p>
-              <p className="enhance-dropzone-sub">or click to browse</p>
-              <p className="enhance-dropzone-formats">
-                MP3 · WAV · M4A · FLAC · OGG · WEBM · OPUS · AAC · MP4 · MKV · MOV
-              </p>
+            <div className="enhance-start-row">
+              <button
+                className="enhance-btn enhance-btn--primary"
+                onClick={startEnhancement}
+                disabled={!anyActive}
+              >
+                <Play size={14} aria-hidden="true" />
+                Enhance
+              </button>
             </div>
-          </>
+          </div>
         )}
 
         {/* Progress view */}
