@@ -21,9 +21,11 @@ ENGINE = os.getenv("TRANSCRIPTION_ENGINE", "faster-whisper")
 WHISPER_DOWNLOAD_ROOT = os.getenv("WHISPER_DOWNLOAD_ROOT", str(_CACHE_BASE / "models" / "whisper"))
 
 # Maps shorter model names to HuggingFace repo IDs.
+# Used as a fallback only — download_faster_whisper() prefers faster-whisper's
+# own internal _MODELS table so this stays in sync with the installed library.
 _SALM_MODELS = {"nvidia/canary-qwen-2.5b"}
 
-_FASTER_WHISPER_REPOS: dict[str, str] = {
+_FASTER_WHISPER_REPOS_FALLBACK: dict[str, str] = {
     "tiny":           "Systran/faster-whisper-tiny",
     "base":           "Systran/faster-whisper-base",
     "small":          "Systran/faster-whisper-small",
@@ -31,8 +33,6 @@ _FASTER_WHISPER_REPOS: dict[str, str] = {
     "large":          "Systran/faster-whisper-large-v1",
     "large-v2":       "Systran/faster-whisper-large-v2",
     "large-v3":       "Systran/faster-whisper-large-v3",
-    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
-    "turbo":          "Systran/faster-whisper-large-v3-turbo",  # alias
 }
 
 
@@ -56,11 +56,29 @@ def download_whisper() -> None:
 def download_faster_whisper() -> None:
     """faster-whisper models are CTranslate2 format, hosted on HuggingFace."""
     model_size = os.getenv("WHISPER_MODEL_SIZE", "large-v3")
-    repo_id = _FASTER_WHISPER_REPOS.get(model_size)
-    if not repo_id:
-        print(f"[faster-whisper] No known HF repo for size '{model_size}' — skipping pre-download.")
-        return
     print(f"[faster-whisper] Checking model '{model_size}' ...")
+
+    # Prefer faster-whisper's own internal model→repo mapping so we stay in sync
+    # with whatever version is installed — no separate table to maintain.
+    repo_id: str | None = None
+    try:
+        from faster_whisper.transcribe import _MODELS  # dict[str, str]
+        repo_id = _MODELS.get(model_size)
+    except (ImportError, AttributeError):
+        pass
+
+    # Fall back to our own table for common sizes
+    if repo_id is None:
+        repo_id = _FASTER_WHISPER_REPOS_FALLBACK.get(model_size)
+
+    # If model_size looks like a full HF repo ID, use it directly
+    if repo_id is None and "/" in model_size:
+        repo_id = model_size
+
+    if repo_id is None:
+        print(f"[faster-whisper] No known HF repo for '{model_size}' — model will download on first use.")
+        return
+
     _hf_snapshot(repo_id)
     print(f"[faster-whisper] '{model_size}' ready.")
 
@@ -97,8 +115,12 @@ def main() -> None:
         print(f"[startup] Unknown engine '{ENGINE}'.", file=sys.stderr)
         sys.exit(1)
 
-    fn()
-    print("[startup] Model ready.")
+    try:
+        fn()
+        print("[startup] Model ready.")
+    except Exception as exc:
+        print(f"[startup] Warning: pre-download failed: {exc}", file=sys.stderr)
+        print("[startup] Server will start anyway — model downloads on first use.", file=sys.stderr)
 
 
 if __name__ == "__main__":
