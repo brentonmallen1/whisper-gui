@@ -1,20 +1,25 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>lumina</Name>
-  <Repository>registry.mallen.us:latest</Repository>
+  <Repository>registry.mallen.us/lumina:latest</Repository>
   <Registry>https://registry.mallen.us/</Registry>
   <Network>bridge</Network>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Overview>Lumina — audio transcription and summarization tool. Supports multiple engines (faster-whisper, whisper, canary, qwen-audio) with optional GPU acceleration. Requires the Nvidia-Driver plugin from Community Apps for GPU support.</Overview>
+
+  <Overview>
+    Lumina — audio transcription and summarization tool. Supports multiple engines
+    (faster-whisper, whisper, canary, qwen-audio) with optional GPU acceleration.
+  </Overview>
+
   <Category>MediaApp:Music MediaApp:Video Tools:</Category>
   <WebUI>http://[IP]:[PORT:8880]/</WebUI>
-  <Icon/>
-  <!-- GPU support: remove --runtime=nvidia to run CPU-only -->
-  <ExtraParams>--runtime=nvidia</ExtraParams>
-  <Requires>Nvidia-Driver plugin (for GPU support)</Requires>
+  <Icon></Icon>
 
-  <!-- ── Ports ───────────────────────────────────────────────────────── -->
+  <!-- GPU (modern syntax) -->
+  <ExtraParams>--gpus all</ExtraParams>
+
+  <!-- ── Ports ───────────────────────────────────────── -->
   <Config
     Name="Web UI Port"
     Target="8000"
@@ -26,154 +31,112 @@
     Required="true"
     Mask="false">8880</Config>
 
-  <Config
-    Name="API Port"
-    Target="8000"
-    Default="8881"
-    Mode="tcp"
-    Description="Optional second port mapping for dedicated API access (e.g. expose to a different network). Leave blank to disable."
-    Type="Port"
-    Display="advanced"
-    Required="false"
-    Mask="false"></Config>
-
-  <!-- ── Paths ───────────────────────────────────────────────────────── -->
+  <!-- ── Paths ───────────────────────────────────────── -->
   <Config
     Name="Models"
     Target="/models"
-    Default="/mnt/user/appdata/whisper-gui/models"
+    Default="/mnt/user/appdata/lumina/models"
     Mode="rw"
-    Description="Persistent storage for downloaded models (can be several GB)."
+    Description="Persistent storage for downloaded models."
     Type="Path"
     Display="always"
-    Required="true"
-    Mask="false">/mnt/user/appdata/whisper-gui/models</Config>
+    Required="true">/mnt/user/appdata/lumina/models</Config>
 
   <Config
     Name="Audio Cache"
     Target="/cache/audio"
-    Default="/mnt/user/appdata/whisper-gui/cache"
+    Default="/mnt/user/appdata/lumina/cache"
     Mode="rw"
     Description="Temporary audio file cache."
     Type="Path"
     Display="always"
-    Required="true"
-    Mask="false">/mnt/user/appdata/whisper-gui/cache</Config>
+    Required="true">/mnt/user/appdata/lumina/cache</Config>
 
   <Config
     Name="App Data"
     Target="/data"
-    Default="/mnt/user/appdata/whisper-gui/data"
+    Default="/mnt/user/appdata/lumina/data"
     Mode="rw"
-    Description="Application data: SQLite database, settings."
+    Description="Application data: DB, settings."
     Type="Path"
     Display="always"
-    Required="true"
-    Mask="false">/mnt/user/appdata/whisper-gui/data</Config>
+    Required="true">/mnt/user/appdata/lumina/data</Config>
 
-  <!-- ── Engine ──────────────────────────────────────────────────────── -->
+  <!-- ── Engine ─────────────────────────────────────── -->
   <Config
     Name="Transcription Engine"
     Target="TRANSCRIPTION_ENGINE"
     Default="faster-whisper"
-    Description="Engine to use for transcription. Options: faster-whisper, whisper, canary, qwen-audio. Note: canary and qwen-audio require GPU and the :canary image tag."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">faster-whisper</Config>
+    Display="always">faster-whisper</Config>
 
-  <!-- ── Model ────────────────────────────────────────────────────────── -->
+  <!-- ── Model ──────────────────────────────────────── -->
   <Config
     Name="Whisper Model Size"
     Target="WHISPER_MODEL_SIZE"
     Default="large-v3-turbo"
-    Description="Model size for faster-whisper/whisper engines. Options: tiny, base, small, medium, large-v3, large-v3-turbo."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">large-v3-turbo</Config>
+    Display="always">large-v3-turbo</Config>
 
   <Config
     Name="Canary Model"
     Target="CANARY_MODEL"
     Default="nvidia/canary-qwen-2.5b"
-    Description="Model to use with the canary engine (requires :canary image tag)."
     Type="Variable"
-    Display="advanced"
-    Required="false"
-    Mask="false">nvidia/canary-qwen-2.5b</Config>
+    Display="advanced">nvidia/canary-qwen-2.5b</Config>
 
   <Config
     Name="Qwen Audio Model"
     Target="QWEN_MODEL"
     Default="Qwen/Qwen2.5-Audio-3B-Instruct"
-    Description="Model to use with the qwen-audio engine."
     Type="Variable"
-    Display="advanced"
-    Required="false"
-    Mask="false">Qwen/Qwen2.5-Audio-3B-Instruct</Config>
+    Display="advanced">Qwen/Qwen2.5-Audio-3B-Instruct</Config>
 
-  <!-- ── Performance ──────────────────────────────────────────────────── -->
+  <!-- ── Performance ────────────────────────────────── -->
   <Config
     Name="Compute Type"
     Target="COMPUTE_TYPE"
     Default="int8_float16"
-    Description="Quantization type. Options: int8 (fastest), int8_float16, float16, float32."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">int8_float16</Config>
+    Display="always">int8_float16</Config>
 
   <Config
     Name="Language"
     Target="LANGUAGE"
     Default="en"
-    Description="Transcription language code (e.g. en, es, fr, de). Leave blank for auto-detect."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">en</Config>
+    Display="always">en</Config>
 
-  <!-- ── API ──────────────────────────────────────────────────────────── -->
+  <!-- ── API ───────────────────────────────────────── -->
   <Config
     Name="API Key"
     Target="API_KEY"
     Default=""
-    Description="Bearer token for programmatic API access. Set to a long random string. Pass as: Authorization: Bearer &lt;key&gt; or X-API-Key: &lt;key&gt;. Leave blank to disable API key auth."
     Type="Variable"
     Display="always"
-    Required="false"
     Mask="true"></Config>
 
-  <!-- ── Auth ─────────────────────────────────────────────────────────── -->
+  <!-- ── Auth ──────────────────────────────────────── -->
   <Config
     Name="Auth Enabled"
     Target="AUTH_ENABLED"
     Default="false"
-    Description="Enable HTTP basic authentication for the web UI."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">false</Config>
+    Display="always">false</Config>
 
   <Config
     Name="Auth Username"
     Target="AUTH_USERNAME"
     Default="admin"
-    Description="Username for basic authentication (only used when Auth Enabled is true)."
     Type="Variable"
-    Display="always"
-    Required="false"
-    Mask="false">admin</Config>
+    Display="always">admin</Config>
 
   <Config
     Name="Auth Password"
     Target="AUTH_PASSWORD"
     Default=""
-    Description="Password for basic authentication (only used when Auth Enabled is true)."
     Type="Variable"
     Display="always"
-    Required="false"
     Mask="true"></Config>
 
 </Container>
