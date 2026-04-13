@@ -93,7 +93,7 @@ ENV TZ=UTC
 
 # Install Playwright's Chromium browser + OS deps BEFORE copying application
 # code so that code changes don't invalidate this layer.
-RUN playwright install chromium --with-deps && \
+RUN /opt/venv/bin/playwright install chromium --with-deps && \
     rm -rf /root/.cache/ms-playwright
 
 # ── Application source ────────────────────────────────────────────────────────
