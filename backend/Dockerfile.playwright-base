@@ -1,0 +1,38 @@
+# ── Playwright + ffmpeg base ──────────────────────────────────────────────────
+# Pre-built image containing Chromium (with all OS deps) and ffmpeg.
+# Used as the FROM for the main image so every release build does not
+# re-download ~400 MB of browser binary.
+#
+# Rebuild whenever the playwright version (in uv.lock) or ffmpeg changes:
+#   just build-playwright-base
+FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Playwright version is extracted from uv.lock by the justfile at build time.
+ARG PLAYWRIGHT_VERSION
+
+# Install Chromium + its system deps via playwright, then strip out pip.
+# All Playwright OS deps (libnss3, libglib2.0-0, etc.) are marked "manually
+# installed" by apt when playwright calls apt-get, so autoremove won't touch them.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        xz-utils \
+        python3-minimal \
+        python3-pip && \
+    pip3 install --break-system-packages "playwright==${PLAYWRIGHT_VERSION}" && \
+    playwright install chromium --with-deps && \
+    pip3 uninstall --break-system-packages -y playwright && \
+    apt-get purge -y python3-pip && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Static ffmpeg binary — separate layer so ffmpeg updates don't bust the Chromium layer
+RUN curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+    -o /tmp/ffmpeg.tar.xz && \
+    tar -xf /tmp/ffmpeg.tar.xz -C /tmp && \
+    mv /tmp/ffmpeg-*-static/ffmpeg /tmp/ffmpeg-*-static/ffprobe /usr/local/bin/ && \
+    rm -rf /tmp/*

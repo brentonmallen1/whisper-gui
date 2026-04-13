@@ -128,6 +128,34 @@ build:
 rebuild:
     docker compose {{ _compose_files }} build --no-cache
 
+# ── Playwright base ────────────────────────────────────────────────────────────
+
+# Extract the locked playwright version from uv.lock
+_playwright-version:
+    @grep -A2 '^name = "playwright"$' backend/uv.lock | grep '^version' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+'
+
+# Build and push the playwright+ffmpeg base image.
+# Only needs rebuilding when the playwright version in uv.lock or ffmpeg changes.
+build-playwright-base:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    registry="${DOCKER_REGISTRY:-}"
+    if [[ -z "$registry" ]]; then
+        echo "Error: DOCKER_REGISTRY not set in .env"
+        exit 1
+    fi
+    version=$(just _playwright-version)
+    echo "Building playwright base (playwright==${version})..."
+    docker buildx build \
+        --platform linux/amd64 \
+        --file backend/Dockerfile.playwright-base \
+        --build-arg PLAYWRIGHT_VERSION="${version}" \
+        --provenance=false \
+        --tag "${registry}:playwright-base" \
+        --push \
+        .
+    echo "✓ Pushed ${registry}:playwright-base"
+
 # ── Docker: Run ───────────────────────────────────────────────────────────────
 
 # Start the app in the background (builds image if needed)
@@ -236,6 +264,7 @@ release:
     docker buildx build \
         --platform linux/amd64 \
         --file backend/Dockerfile \
+        --build-arg PLAYWRIGHT_BASE_IMAGE="${registry}:playwright-base" \
         --provenance=false \
         --cache-from "type=registry,ref=${registry}:buildcache" \
         --cache-to   "type=registry,ref=${registry}:buildcache,mode=max" \
@@ -281,6 +310,7 @@ release-canary:
         --platform linux/amd64 \
         --file backend/Dockerfile \
         --build-arg INSTALL_CANARY=true \
+        --build-arg PLAYWRIGHT_BASE_IMAGE="${registry}:playwright-base" \
         --provenance=false \
         --cache-from "type=registry,ref=${registry}:buildcache-canary" \
         --cache-to   "type=registry,ref=${registry}:buildcache-canary,mode=max" \

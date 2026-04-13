@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      args:
+        PLAYWRIGHT_BASE_IMAGE: "${DOCKER_REGISTRY}:playwright-base"
     ports:
       - "${APP_PORT:-8880}:8000"
       # Uncomment to expose the API on a separate host port (e.g. for dedicated firewall rules)

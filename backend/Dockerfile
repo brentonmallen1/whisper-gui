@@ -57,25 +57,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi
 
 # ── Stage 3: Runtime ──────────────────────────────────────────────────────────
-FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
-
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Runtime-only system packages — build-essential and cargo are intentionally absent
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        git \
-        curl \
-        xz-utils && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-# Static ffmpeg binary — avoids pulling in GTK, GL, and dozens of codec libs
-RUN curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
-    -o /tmp/ffmpeg.tar.xz && \
-    tar -xf /tmp/ffmpeg.tar.xz -C /tmp && \
-    mv /tmp/ffmpeg-*-static/ffmpeg /tmp/ffmpeg-*-static/ffprobe /usr/local/bin/ && \
-    rm -rf /tmp/*
+# Derives from a pre-built base that has Chromium, its OS deps, and ffmpeg.
+# Build the base first (only needed when playwright or ffmpeg version changes):
+#   just build-playwright-base
+ARG PLAYWRIGHT_BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+FROM ${PLAYWRIGHT_BASE_IMAGE}
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
@@ -90,11 +76,6 @@ WORKDIR /app
 
 ENV TZ=UTC
 # Override with your local timezone, e.g. TZ=America/New_York
-
-# Install Playwright's Chromium browser + OS deps BEFORE copying application
-# code so that code changes don't invalidate this layer.
-RUN /opt/venv/bin/playwright install chromium --with-deps && \
-    rm -rf /root/.cache/ms-playwright
 
 # ── Application source ────────────────────────────────────────────────────────
 COPY backend/ .
