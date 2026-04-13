@@ -1,3 +1,7 @@
+# Global build args — must be declared before the first FROM so they can be
+# referenced in FROM instructions across stages.
+ARG PLAYWRIGHT_BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+
 # ── Stage 1: Build React frontend ────────────────────────────────────────────
 FROM node:20-slim AS node-builder
 
@@ -60,7 +64,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Derives from a pre-built base that has Chromium, its OS deps, and ffmpeg.
 # Build the base first (only needed when playwright or ffmpeg version changes):
 #   just build-playwright-base
-ARG PLAYWRIGHT_BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
 FROM ${PLAYWRIGHT_BASE_IMAGE}
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
