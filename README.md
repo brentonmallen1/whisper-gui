@@ -65,7 +65,7 @@ Applies to `whisper` and `faster-whisper`.
 | `small` | ~2 GB | Good CPU choice |
 | `medium` | ~5 GB | |
 | `large-v3` | ~10 GB | Highest accuracy |
-| `large-v3-turbo` | ~6 GB | **Recommended for GPU.** Large-v3 encoder, pruned decoder — ~8× faster with minimal quality loss. |
+| `large-v3-turbo` | ~1.5 GB | **Recommended for GPU.** Distil-Whisper large-v3 — ~8× faster than large-v3 with minimal quality loss. |
 
 ### Canary models
 
