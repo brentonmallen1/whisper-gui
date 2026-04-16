@@ -41,6 +41,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 ENV VIRTUAL_ENV=/opt/venv
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 ARG INSTALL_CANARY=false

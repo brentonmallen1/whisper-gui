@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Ensure venv is on PATH (belt-and-suspenders for entrypoint)
-export PATH="/app/.venv/bin:$PATH"
+export PATH="/opt/venv/bin:$PATH"
 
 echo "========================================"
 echo " Lumina"
