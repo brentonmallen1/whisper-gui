@@ -1,6 +1,6 @@
 # Global build args must be declared before the first FROM so they can be used
 # in FROM and COPY --from instructions across all stages.
-ARG PLAYWRIGHT_BASE_IMAGE=ubuntu:24.04
+ARG PLAYWRIGHT_BASE_IMAGE=registry.mallen.us/lumina:playwright-base
 
 # ── Stage 0: Playwright base alias ───────────────────────────────────────────
 # Docker doesn't support variable expansion in COPY --from, so we alias the

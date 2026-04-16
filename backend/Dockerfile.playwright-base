@@ -1,35 +1,16 @@
 # ── Playwright + ffmpeg base ──────────────────────────────────────────────────
-# Lightweight Ubuntu image containing only Chromium + its OS deps + ffmpeg.
-# Intentionally does NOT use the CUDA base — that would add ~15 GB for no reason.
+# Extends the official Playwright Python image (Chromium + all OS deps included)
+# with a static ffmpeg binary. Intentionally does NOT use the CUDA base.
 # Rebuild when the playwright version (in uv.lock) or ffmpeg changes:
 #   just build-playwright-base
-FROM ubuntu:24.04
-
-ARG DEBIAN_FRONTEND=noninteractive
-
-# Version is extracted from uv.lock by the justfile and passed via --build-arg.
 ARG PLAYWRIGHT_VERSION
-
-# Install Chromium + its system deps via playwright, then strip pip back out.
-# PLAYWRIGHT_BROWSERS_PATH controls where the browser binary lands.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        curl \
-        xz-utils \
-        python3-minimal \
-        python3-pip && \
-    pip3 install --break-system-packages "playwright==${PLAYWRIGHT_VERSION}" && \
-    playwright install chromium --with-deps && \
-    pip3 uninstall --break-system-packages -y playwright && \
-    apt-get purge -y python3-pip && \
-    apt-get autoremove -y && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+FROM mcr.microsoft.com/playwright/python:v${PLAYWRIGHT_VERSION}-noble
 
 # Static ffmpeg binary — separate layer so ffmpeg updates don't bust the Chromium layer
-ENV PATH="/usr/local/bin:${PATH}"
-RUN set -eux; \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends xz-utils && \
+    rm -rf /var/lib/apt/lists/* && \
+    set -eux; \
     mkdir -p /usr/local/bin; \
     curl -fL --retry 3 https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
         -o /tmp/ffmpeg.tar.xz; \
