@@ -537,7 +537,7 @@ export default function Summarize() {
       if (cached) {
         onPhase('extracting', 'Using cached extraction…');
         onExtracted(cached.content);
-        await api.summarize(cached.content, effectiveMode, null, onChunk, onError, onDone);
+        await api.summarize(cached.content, effectiveMode, null, onChunk, onError, onDone, onWarning);
       } else {
         await fallback();
       }
@@ -548,7 +548,7 @@ export default function Summarize() {
         const trimmed = content.trim();
         setSourceContent(trimmed);
         setModeCache(prev => ({ ...prev, transcript: { result: trimmed, reasoning: '' } }));
-        await api.summarize(trimmed, effectiveMode, null, onChunk, onError, onDone);
+        await api.summarize(trimmed, effectiveMode, null, onChunk, onError, onDone, onWarning);
         break;
       }
 
@@ -556,7 +556,7 @@ export default function Summarize() {
         const key = fileCacheKey('audio', audioFile!);
         await tryFromCache(key, () =>
           api.summarizeFile(audioFile!, 'audio', effectiveMode, onPhase, onChunk, onError, onDone, enhancement,
-            withCaching(key, audioFile!.name, 'audio', onExtracted))
+            withCaching(key, audioFile!.name, 'audio', onExtracted), onWarning)
         );
         break;
       }
@@ -565,7 +565,7 @@ export default function Summarize() {
         const key = fileCacheKey('pdf', pdfFile!);
         await tryFromCache(key, () =>
           api.summarizeFile(pdfFile!, 'pdf', effectiveMode, onPhase, onChunk, onError, onDone, undefined,
-            withCaching(key, pdfFile!.name, 'pdf', onExtracted))
+            withCaching(key, pdfFile!.name, 'pdf', onExtracted), onWarning)
         );
         break;
       }
@@ -606,7 +606,7 @@ export default function Summarize() {
 
       case 'image':
         // No onExtracted: images have no text content, chat panel stays hidden
-        await api.summarizeImage(imageFile!, effectiveMode, onChunk, onError, onDone);
+        await api.summarizeImage(imageFile!, effectiveMode, onChunk, onError, onDone, onWarning);
         break;
     }
   };

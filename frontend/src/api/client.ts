@@ -618,6 +618,7 @@ export async function summarize(
   onChunk: (text: string) => void,
   onError: (message: string) => void,
   onDone: () => void,
+  onWarning?: (message: string) => void,
 ): Promise<void> {
   let res: Response;
   try {
@@ -635,7 +636,7 @@ export async function summarize(
     onError(body.detail ?? res.statusText);
     return;
   }
-  await consumeSSE(res, () => {}, onChunk, onError, onDone);
+  await consumeSSE(res, () => {}, onChunk, onError, onDone, undefined, onWarning);
 }
 
 /**
@@ -652,6 +653,7 @@ export async function summarizeFile(
   onDone: () => void,
   enhancement?: Partial<EnhancementOptions>,
   onExtracted?: (content: string, truncated: boolean) => void,
+  onWarning?: (message: string) => void,
 ): Promise<void> {
   const form = new FormData();
   form.append('file', file);
@@ -676,7 +678,7 @@ export async function summarizeFile(
     onError(body.detail ?? res.statusText);
     return;
   }
-  await consumeSSE(res, onPhase, onChunk, onError, onDone, onExtracted);
+  await consumeSSE(res, onPhase, onChunk, onError, onDone, onExtracted, onWarning);
 }
 
 /**
@@ -690,6 +692,7 @@ export async function summarizeImage(
   onChunk: (text: string) => void,
   onError: (message: string) => void,
   onDone: () => void,
+  onWarning?: (message: string) => void,
 ): Promise<void> {
   const form = new FormData();
   form.append('file', file);
@@ -707,7 +710,7 @@ export async function summarizeImage(
     onError(body.detail ?? res.statusText);
     return;
   }
-  await consumeSSE(res, () => {}, onChunk, onError, onDone);
+  await consumeSSE(res, () => {}, onChunk, onError, onDone, undefined, onWarning);
 }
 
 /**
